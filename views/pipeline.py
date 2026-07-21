@@ -1,15 +1,61 @@
-from datetime import date
+from datetime import date, timedelta
 
 import streamlit as st
 
 import db
 import helpers
 
+try:
+    from streamlit_sortables import sort_items
+    SLEPEN_BESCHIKBAAR = True
+except ImportError:
+    SLEPEN_BESCHIKBAAR = False
+
+
+# Simpele, rustige stijl voor het sleepbare bord (past bij de rest van de app)
+_SORT_STYLE = """
+.sortable-component {
+    font-family: 'Inter', sans-serif;
+}
+.sortable-container {
+    background: #F1F3F6;
+    border: 1px solid #E8EAEE;
+    border-radius: 8px;
+    min-height: 90px;
+}
+.sortable-container-header {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #374151;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: #F1F3F6;
+    padding: 8px 10px;
+    border-radius: 8px 8px 0 0;
+}
+.sortable-container-body {
+    padding: 6px;
+}
+.sortable-item {
+    background: #FFFFFF;
+    border: 1px solid #E8EAEE;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    font-size: 0.82rem;
+    color: #16204E;
+    cursor: grab;
+}
+.sortable-item:hover {
+    box-shadow: 0 2px 6px rgba(22,32,78,0.10);
+}
+"""
+
 
 def toon():
     st.title("Pipeline")
 
-    tab_bord, tab_nieuw, tab_bewerk = st.tabs(["📋 Bord", "➕ Nieuwe deal", "✏️ Bewerken"])
+    tab_bord, tab_nieuw, tab_bewerk = st.tabs(["📋 Bord", "➕ Nieuwe deal", "✏️ Bewerken & taken"])
 
     deals = db.query_df(
         "SELECT d.*, o.naam AS organisatie FROM deals d "
@@ -21,32 +67,69 @@ def toon():
         toon_afgerond = st.toggle("Toon ook Afgerond / Verloren", value=False)
         kolommen_namen = helpers.STADIUM_NAMEN if toon_afgerond else actief
 
-        # kolommen in rijen van 4 zodat het leesbaar blijft
-        for start in range(0, len(kolommen_namen), 4):
-            rij = kolommen_namen[start:start + 4]
-            cols = st.columns(len(rij))
-            for col, stadium in zip(cols, rij):
+        if not SLEPEN_BESCHIKBAAR:
+            st.info("Sleepfunctie niet beschikbaar (package 'streamlit-sortables' ontbreekt "
+                    "— staat wel in requirements.txt, dus dit lost zich op na de eerstvolgende "
+                    "herstart/redeploy). Gebruik ondertussen 'Deal verplaatsen' hieronder.")
+
+        if SLEPEN_BESCHIKBAAR:
+            st.caption("🖱️ Sleep een kaart naar een andere kolom om het stadium te wijzigen.")
+            label_naar_id = {}
+            containers = []
+            for stadium in kolommen_namen:
                 sub = deals[deals["stadium"] == stadium] if not deals.empty else deals
-                kleur = helpers.STADIUM_KLEUR.get(stadium, "#2338B0")
                 som = sub["waarde"].fillna(0).sum() if not sub.empty else 0
-                col.markdown(
-                    f'<div class="kolomkop" style="--kaartkleur:{kleur}">{stadium}'
-                    f'<br><span class="kolom-som">{len(sub)} · {helpers.euro(som)}</span></div>',
-                    unsafe_allow_html=True)
-                if sub.empty:
-                    continue
+                labels = []
                 for _, d in sub.iterrows():
+                    label = f"{d['titel']} · {helpers.euro(d['waarde'])}  [#{int(d['id'])}]"
+                    labels.append(label)
+                    label_naar_id[label] = int(d["id"])
+                containers.append({"header": f"{stadium}  ({len(sub)} · {helpers.euro(som)})",
+                                   "items": labels})
+
+            resultaat = sort_items(containers, multi_containers=True, custom_style=_SORT_STYLE,
+                                   key="pipeline_bord")
+
+            if resultaat:
+                huidig_stadium = {}
+                if not deals.empty:
+                    huidig_stadium = dict(zip(deals["id"].astype(int), deals["stadium"]))
+                gewijzigd = []
+                for stadium, kolom in zip(kolommen_namen, resultaat):
+                    for label in kolom.get("items", []):
+                        deal_id = label_naar_id.get(label)
+                        if deal_id is None:
+                            continue
+                        if huidig_stadium.get(deal_id) != stadium:
+                            gewijzigd.append((deal_id, stadium))
+                if gewijzigd:
+                    for deal_id, nieuw_stadium in gewijzigd:
+                        helpers.wijzig_stadium(deal_id, nieuw_stadium)
+                    st.rerun()
+        else:
+            # Terugvalweergave zonder drag & drop (enkel als het package niet geladen kon worden)
+            for start in range(0, len(kolommen_namen), 4):
+                rij = kolommen_namen[start:start + 4]
+                cols = st.columns(len(rij))
+                for col, stadium in zip(cols, rij):
+                    sub = deals[deals["stadium"] == stadium] if not deals.empty else deals
+                    kleur = helpers.STADIUM_KLEUR.get(stadium, "#2338B0")
+                    som = sub["waarde"].fillna(0).sum() if not sub.empty else 0
                     col.markdown(
-                        f'<div class="kanban-kaart" style="--kaartkleur:{kleur}">'
-                        f'<b>{d["titel"]}</b><br>'
-                        f'<span class="kaart-meta">{d.get("organisatie") or "—"} · '
-                        f'{d.get("type_installatie") or ""}</span><br>'
-                        f'<span class="kaart-waarde">{helpers.euro(d["waarde"])}</span> '
-                        f'<span class="kaart-meta">· kans {int(d.get("kans") or 0)}%</span></div>',
+                        f'<div class="kolomkop" style="--kaartkleur:{kleur}">{stadium}'
+                        f'<br><span class="kolom-som">{len(sub)} · {helpers.euro(som)}</span></div>',
                         unsafe_allow_html=True)
+                    for _, d in sub.iterrows():
+                        col.markdown(
+                            f'<div class="kanban-kaart" style="--kaartkleur:{kleur}">'
+                            f'<b>{d["titel"]}</b><br>'
+                            f'<span class="kaart-meta">{d.get("organisatie") or "—"}</span><br>'
+                            f'<span class="kaart-waarde">{helpers.euro(d["waarde"])}</span></div>',
+                            unsafe_allow_html=True)
 
         st.divider()
         st.subheader("Deal verplaatsen of verwijderen")
+        st.caption("Werkt ook zonder slepen — bv. handig op mobiel, of om snel een test-deal op te ruimen.")
         if deals.empty:
             st.info("Nog geen deals.")
         else:
@@ -100,6 +183,10 @@ def toon():
                 deadline = st.date_input("Deadline", value=None)
             with c6:
                 stadium = st.selectbox("Startstadium", helpers.STADIUM_NAMEN, index=0)
+            sj_direct = st.multiselect(
+                "Meteen ook taken aanmaken voor deze deal (optioneel)",
+                [naam for naam, _ in helpers.TAAK_SJABLONEN],
+                help="Wordt aangemaakt met de standaard-datums uit het sjabloon (aanpasbaar later op het Actieblad).")
             if st.form_submit_button("Deal aanmaken", type="primary"):
                 if not titel.strip():
                     st.error("Titel is verplicht.")
@@ -112,10 +199,18 @@ def toon():
                         deadline=deadline.isoformat() if deadline else "",
                         stadium=stadium, prioriteit=prioriteit))
                     helpers.maak_vervolgactie(deal_id, stadium)
-                    st.success("Deal aangemaakt (met automatische vervolgactie).")
+                    if sj_direct:
+                        sjabloon_dagen = dict(helpers.TAAK_SJABLONEN)
+                        for naam in sj_direct:
+                            db.voeg_toe("acties", dict(
+                                datum=(date.today() + timedelta(days=sjabloon_dagen[naam])).isoformat(),
+                                prioriteit="Normaal", organisatie_id=organisatie_id or None,
+                                deal_id=deal_id, actie=naam, status="Open"))
+                    st.success("Deal aangemaakt (met automatische vervolgactie)"
+                              + (f" + {len(sj_direct)} taken." if sj_direct else "."))
                     st.rerun()
 
-    # ---------------- bewerken ----------------
+    # ---------------- bewerken & taken ----------------
     with tab_bewerk:
         if deals.empty:
             st.info("Nog geen deals.")
@@ -126,6 +221,7 @@ def toon():
         d = db.haal_rij("deals", int(keuze)) or {}
         orgs = db.organisatie_opties()
         installaties = db.installatie_opties()
+
         with st.form("deal_bewerk"):
             titel = st.text_input("Titel*", value=d.get("titel") or "")
             c1, c2, c3 = st.columns(3)
@@ -177,3 +273,59 @@ def toon():
             db.verwijder("deals", int(keuze))
             st.success("Deal verwijderd.")
             st.rerun()
+
+        # ---- Taken voor deze deal, rechtstreeks hier ----
+        st.divider()
+        st.subheader(f"🗒️ Taken voor '{d.get('titel', '')}'")
+
+        acties_deal = db.query_df(
+            "SELECT * FROM acties WHERE deal_id = ? ORDER BY datum", (int(keuze),))
+        if acties_deal.empty:
+            st.caption("Nog geen taken voor deze deal.")
+        else:
+            for _, a in acties_deal.iterrows():
+                laat = helpers.te_laat(a["datum"]) and a["status"] in ("Open", "Bezig")
+                ac1, ac2 = st.columns([4, 1.3])
+                with ac1:
+                    datum_html = (f'<span class="telaat">{a["datum"]} — TE LAAT</span>'
+                                  if laat else str(a["datum"]))
+                    st.markdown(
+                        f'<div class="kanban-kaart" style="--kaartkleur:'
+                        f'{"#B4443C" if laat else "#2338B0"}">'
+                        f'<b>{a["actie"]}</b><br>'
+                        f'<span class="kaart-meta">{datum_html} · {a["status"]}</span></div>',
+                        unsafe_allow_html=True)
+                with ac2:
+                    nieuw_status = st.selectbox(
+                        "Status", helpers.ACTIE_STATUSSEN,
+                        index=helpers.ACTIE_STATUSSEN.index(a["status"])
+                        if a["status"] in helpers.ACTIE_STATUSSEN else 0,
+                        key=f"pipe_actie_status_{a['id']}", label_visibility="collapsed")
+                    if nieuw_status != a["status"]:
+                        db.werk_bij("acties", int(a["id"]), {"status": nieuw_status})
+                        st.rerun()
+
+        with st.expander("⚡ Taken uit sjabloon toevoegen aan deze deal"):
+            sj_start = st.date_input("Startdatum (referentiepunt)", value=date.today(), key="pipe_sj_start")
+            gekozen = {}
+            for naam, dagen in helpers.TAAK_SJABLONEN:
+                pc1, pc2 = st.columns([3, 1])
+                with pc1:
+                    aan = st.checkbox(naam, key=f"pipe_sj_check_{naam}")
+                with pc2:
+                    datum_veld = st.date_input(
+                        "Datum", value=sj_start + timedelta(days=dagen),
+                        key=f"pipe_sj_datum_{naam}", label_visibility="collapsed")
+                if aan:
+                    gekozen[naam] = datum_veld
+            if st.button("➕ Toevoegen aan deze deal", key="pipe_sj_toevoegen"):
+                if not gekozen:
+                    st.error("Vink minstens één taak aan.")
+                else:
+                    for naam, datum_veld in gekozen.items():
+                        db.voeg_toe("acties", dict(
+                            datum=datum_veld.isoformat(), prioriteit="Normaal",
+                            organisatie_id=d.get("organisatie_id"), deal_id=int(keuze),
+                            actie=naam, status="Open"))
+                    st.success(f"{len(gekozen)} taken toegevoegd aan deze deal.")
+                    st.rerun()
