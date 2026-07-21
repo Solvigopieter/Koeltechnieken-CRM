@@ -154,6 +154,20 @@ def sleutel_uit_opties(opties_dict: dict, huidige_id) -> int:
         return 0
 
 
+def volgend_klantnummer(prefix: str = "AC") -> str:
+    """Geeft het eerstvolgende klantnummer terug, bv. AC0001, AC0002, ...
+    Kijkt naar het hoogste al bestaande nummer met dit voorvoegsel."""
+    df = db.query_df("SELECT klantnummer FROM organisaties WHERE klantnummer IS NOT NULL AND klantnummer != ''")
+    hoogste = 0
+    if not df.empty:
+        for waarde in df["klantnummer"].astype(str):
+            if waarde.upper().startswith(prefix.upper()):
+                cijfers = waarde[len(prefix):]
+                if cijfers.isdigit():
+                    hoogste = max(hoogste, int(cijfers))
+    return f"{prefix}{hoogste + 1:04d}"
+
+
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');

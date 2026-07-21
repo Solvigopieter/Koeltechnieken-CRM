@@ -46,11 +46,11 @@ def toon():
                         unsafe_allow_html=True)
 
         st.divider()
-        st.subheader("Deal verplaatsen")
+        st.subheader("Deal verplaatsen of verwijderen")
         if deals.empty:
             st.info("Nog geen deals.")
         else:
-            c1, c2, c3 = st.columns([2, 2, 1])
+            c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
             with c1:
                 keuze = st.selectbox(
                     "Deal", deals["id"].tolist(),
@@ -67,6 +67,14 @@ def toon():
                     actie = helpers.wijzig_stadium(int(keuze), nieuw)
                     st.success(f"Verplaatst naar **{nieuw}**."
                                + (f" Vervolgactie aangemaakt: *{actie}*" if actie else ""))
+                    st.rerun()
+            with c4:
+                st.write("")
+                st.write("")
+                if st.button("🗑️ Verwijder", use_container_width=True,
+                            help="Verwijdert deze deal meteen — handig om test-deals op te ruimen."):
+                    db.verwijder("deals", int(keuze))
+                    st.success("Deal verwijderd.")
                     st.rerun()
 
     # ---------------- nieuw ----------------

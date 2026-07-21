@@ -12,8 +12,8 @@ def toon():
     if url:
         st.link_button("📄 Nieuwe offerte maken in de offertegenerator ↗", url)
 
-    tab_crm, tab_generator, tab_nieuw = st.tabs(
-        ["📋 Offertes in CRM", "🔗 Uit de offertegenerator", "➕ Handmatig toevoegen"])
+    tab_crm, tab_bewerk, tab_generator, tab_nieuw = st.tabs(
+        ["📋 Offertes in CRM", "✏️ Bewerken / verwijderen", "🔗 Uit de offertegenerator", "➕ Handmatig toevoegen"])
 
     offertes = db.query_df(
         "SELECT f.*, d.titel AS deal, i.naam AS installatie FROM offertes f "
@@ -49,7 +49,7 @@ def toon():
                 helpers.export_knop(sub, "offertes.xlsx")
 
                 st.divider()
-                st.subheader("Status aanpassen")
+                st.subheader("Status snel aanpassen")
                 c1, c2, c3 = st.columns([2, 2, 1])
                 with c1:
                     keuze = st.selectbox("Offerte", sub["id"].tolist(),
@@ -74,6 +74,56 @@ def toon():
                                 helpers.wijzig_stadium(int(rij["deal_id"]), "Verloren")
                         st.success("Status bijgewerkt (deal-stadium mee aangepast waar logisch).")
                         st.rerun()
+
+    # ---------------- bewerken / verwijderen ----------------
+    with tab_bewerk:
+        if offertes.empty:
+            st.info("Nog geen offertes.")
+        else:
+            st.caption("Hier kan je o.a. een fout bedrag corrigeren (bv. bij een offerte die "
+                      "geïmporteerd werd vóór een fix in de koppeling) of een offerte verwijderen.")
+            keuze = st.selectbox(
+                "Kies offerte", offertes["id"].tolist(),
+                format_func=lambda i: str(offertes.set_index("id").loc[i, "nummer"]), key="off_bewerk_keuze")
+            f = db.haal_rij("offertes", int(keuze)) or {}
+            deals = db.deal_opties()
+            installaties = db.installatie_opties()
+            with st.form("offerte_bewerk"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    nummer = st.text_input("Offertenummer", value=f.get("nummer") or "")
+                    otype = st.selectbox("Type", helpers.DEAL_TYPES,
+                                         index=helpers.DEAL_TYPES.index(f.get("type"))
+                                         if f.get("type") in helpers.DEAL_TYPES else 0)
+                    deal_id = st.selectbox("Deal", list(deals), format_func=deals.get,
+                                           index=helpers.sleutel_uit_opties(deals, f.get("deal_id")))
+                with c2:
+                    totaalprijs = st.number_input("Totaal incl. BTW (EUR)", min_value=0.0, step=10.0,
+                                                  value=float(f.get("totaalprijs") or 0))
+                    btw_tarief = st.selectbox("BTW-tarief", helpers.BTW_TARIEVEN,
+                                              index=helpers.BTW_TARIEVEN.index(f.get("btw_tarief"))
+                                              if f.get("btw_tarief") in helpers.BTW_TARIEVEN else 0)
+                    installatie_id = st.selectbox("Installatie-adres", list(installaties),
+                                                  format_func=installaties.get,
+                                                  index=helpers.sleutel_uit_opties(installaties, f.get("installatie_id")))
+                status = st.selectbox("Status", helpers.OFFERTE_STATUSSEN,
+                                      index=helpers.OFFERTE_STATUSSEN.index(f.get("status"))
+                                      if f.get("status") in helpers.OFFERTE_STATUSSEN else 0)
+                opmerkingen = st.text_area("Opmerkingen", value=f.get("opmerkingen") or "", height=60)
+                k1, k2 = st.columns(2)
+                opslaan = k1.form_submit_button("Opslaan", type="primary")
+                weg = k2.form_submit_button("🗑️ Verwijder offerte")
+            if opslaan:
+                db.werk_bij("offertes", int(keuze), dict(
+                    nummer=nummer, type=otype, deal_id=deal_id or None,
+                    installatie_id=installatie_id or None, totaalprijs=totaalprijs,
+                    btw_tarief=btw_tarief, status=status, opmerkingen=opmerkingen))
+                st.success("Offerte bijgewerkt.")
+                st.rerun()
+            if weg:
+                db.verwijder("offertes", int(keuze))
+                st.success("Offerte verwijderd.")
+                st.rerun()
 
     # ---------------- generator-projecten ----------------
     with tab_generator:
@@ -107,22 +157,52 @@ def toon():
                         f"{p.get('klant')} — {helpers.euro(offerte_koppeling.bedrag_van(p))}"
                     ):
                         if geimporteerd:
-                            st.success("Al geïmporteerd in het CRM.")
+                            reeds = offertes[offertes["generator_id"].astype(str) == pid]
+                            huidig_bedrag = reeds.iloc[0]["totaalprijs"] if not reeds.empty else 0
+                            st.info(f"Al geïmporteerd in het CRM als offerte met bedrag "
+                                   f"**{helpers.euro(huidig_bedrag)}**.")
+                            if abs(float(huidig_bedrag or 0) - offerte_koppeling.bedrag_van(p)) > 0.01:
+                                st.warning("⚠️ Dit bedrag wijkt af van wat de generator nu toont "
+                                          f"({helpers.euro(offerte_koppeling.bedrag_van(p))}) — "
+                                          "waarschijnlijk geïmporteerd vóór een eerdere fix.")
+                            if st.button("🗑️ Verwijder deze offerte uit CRM (zodat je opnieuw kan importeren)",
+                                        key=f"gen_verwijder_reimport_{pid}"):
+                                if not reeds.empty:
+                                    db.verwijder("offertes", int(reeds.iloc[0]["id"]))
+                                    st.success("Verwijderd — je kan dit project nu hieronder opnieuw importeren.")
+                                    st.rerun()
                             continue
+
+                        payload = offerte_koppeling.payload_van(p)
 
                         with st.expander("⚡ Nieuwe klant + deal in 1 klik aanmaken "
                                          "(handig — de meeste HVAC-klanten bestaan nog niet in het CRM)"):
-                            st.caption("Maakt een organisatie (type 'Eindklant') en een deal aan, "
-                                      "gebaseerd op deze offerte, en koppelt ze meteen hieronder.")
-                            snel_naam = st.text_input("Klantnaam", value=str(p.get("klant") or ""),
-                                                      key=f"gen_snelnaam_{pid}")
+                            st.caption("Naam/adres/e-mail/telefoon worden overgenomen uit de offerte "
+                                      "zelf. Klantnummer wordt automatisch voorgesteld.")
+                            sc1, sc2 = st.columns([1, 3])
+                            with sc1:
+                                snel_nr = st.text_input("Klantnummer", value=helpers.volgend_klantnummer(),
+                                                        key=f"gen_snelnr_{pid}")
+                            with sc2:
+                                snel_naam = st.text_input("Klantnaam", value=str(p.get("klant") or ""),
+                                                          key=f"gen_snelnaam_{pid}")
+                            sc3, sc4 = st.columns(2)
+                            with sc3:
+                                snel_adres = st.text_input("Adres", value=str(payload.get("adres") or ""),
+                                                           key=f"gen_sneladres_{pid}")
+                                snel_email = st.text_input("E-mail", value=str(payload.get("email") or ""),
+                                                           key=f"gen_snelemail_{pid}")
+                            with sc4:
+                                snel_tel = st.text_input("Telefoon", value=str(payload.get("tel") or ""),
+                                                         key=f"gen_sneltel_{pid}")
                             if st.button("➕ Klant + deal aanmaken", key=f"gen_snelmaak_{pid}"):
                                 if not snel_naam.strip():
                                     st.error("Vul een klantnaam in.")
                                 else:
                                     nieuw_org_id = db.voeg_toe("organisaties", dict(
-                                        naam=snel_naam.strip(), type="Eindklant",
-                                        status="Actief", relatietype="Eenmalige klant"))
+                                        klantnummer=snel_nr.strip(), naam=snel_naam.strip(),
+                                        type="Eindklant", adres=snel_adres, email=snel_email,
+                                        telefoon=snel_tel, status="Actief", relatietype="Eenmalige klant"))
                                     nieuwe_deal_id = db.voeg_toe("deals", dict(
                                         titel=f"{p.get('type') or 'Offerte'} — {snel_naam.strip()}",
                                         type_installatie=p.get("type") or "Airco",
@@ -131,7 +211,7 @@ def toon():
                                         kans=70, stadium="Offerte verstuurd", prioriteit="Normaal",
                                         bron="Offertegenerator"))
                                     st.session_state[f"gen_deal_{pid}"] = nieuwe_deal_id
-                                    st.success(f"Klant en deal aangemaakt — automatisch gekoppeld.")
+                                    st.success(f"Klant {snel_nr.strip()} en deal aangemaakt — automatisch gekoppeld.")
                                     st.rerun()
 
                         c1, c2 = st.columns(2)

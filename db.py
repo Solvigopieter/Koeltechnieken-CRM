@@ -33,6 +33,7 @@ TABEL_KOLOMMEN: dict[str, list[str]] = {
     "organisaties": [
         "id", "naam", "type", "btw", "adres", "gemeente", "sector", "website",
         "status", "relatietype", "notities", "aangemaakt",
+        "klantnummer", "email", "telefoon",
     ],
     "contacten": [
         "id", "organisatie_id", "naam", "functie", "email", "telefoon", "linkedin",
@@ -112,9 +113,11 @@ STANDAARDEN: dict[str, dict[str, Any]] = {
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS organisaties (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    klantnummer TEXT,
     naam TEXT NOT NULL,
     type TEXT NOT NULL DEFAULT 'Eindklant',
     btw TEXT, adres TEXT, gemeente TEXT, sector TEXT, website TEXT,
+    email TEXT, telefoon TEXT,
     status TEXT NOT NULL DEFAULT 'Prospect',
     relatietype TEXT NOT NULL DEFAULT 'Prospect',
     notities TEXT,
