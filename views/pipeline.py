@@ -5,6 +5,60 @@ import streamlit as st
 import db
 import helpers
 
+try:
+    from streamlit_sortables import sort_items
+    SLEPEN_BESCHIKBAAR = True
+except ImportError:
+    SLEPEN_BESCHIKBAAR = False
+
+
+def _sort_style(kolommen_namen):
+    """Bouwt CSS die elke kolom in de huisstijl-kleur van dat stadium kleurt."""
+    regels = ["""
+.sortable-component { font-family: 'Inter', sans-serif; gap: 10px; }
+.sortable-container {
+    background: #FFFFFF;
+    border: 1px solid #E8EAEE;
+    border-radius: 8px;
+    min-height: 90px;
+}
+.sortable-container-header {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #374151;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: #F1F3F6;
+    padding: 8px 10px;
+    border-radius: 7px 7px 0 0;
+    border-bottom: 1px solid #E8EAEE;
+    text-align: center;
+}
+.sortable-container-body { padding: 6px; }
+.sortable-item {
+    background: #FFFFFF;
+    border: 1px solid #E8EAEE;
+    border-left-width: 3px;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    font-size: 0.8rem;
+    color: #16204E;
+    line-height: 1.4;
+    cursor: grab;
+    box-shadow: 0 1px 2px rgba(22,32,78,0.04);
+}
+.sortable-item:hover { box-shadow: 0 2px 6px rgba(22,32,78,0.10); }
+"""]
+    for i, stadium in enumerate(kolommen_namen, start=1):
+        kleur = helpers.STADIUM_KLEUR.get(stadium, "#2338B0")
+        regels.append(
+            f".sortable-container:nth-of-type({i}) .sortable-container-header "
+            f"{{ border-top: 3px solid {kleur}; }}\n"
+            f".sortable-container:nth-of-type({i}) .sortable-item {{ border-left-color: {kleur}; }}"
+        )
+    return "\n".join(regels)
+
 
 def toon():
     st.title("Pipeline")
@@ -21,29 +75,61 @@ def toon():
         toon_afgerond = st.toggle("Toon ook Afgerond / Verloren", value=False)
         kolommen_namen = helpers.STADIUM_NAMEN if toon_afgerond else actief
 
-        # kolommen in rijen van 4 zodat het leesbaar blijft
-        for start in range(0, len(kolommen_namen), 4):
-            rij = kolommen_namen[start:start + 4]
-            cols = st.columns(len(rij))
-            for col, stadium in zip(cols, rij):
+        if SLEPEN_BESCHIKBAAR:
+            st.caption("🖱️ Sleep een kaart naar een andere kolom om het stadium meteen te wijzigen.")
+            label_naar_id = {}
+            containers = []
+            for stadium in kolommen_namen:
                 sub = deals[deals["stadium"] == stadium] if not deals.empty else deals
-                kleur = helpers.STADIUM_KLEUR.get(stadium, "#2338B0")
                 som = sub["waarde"].fillna(0).sum() if not sub.empty else 0
-                col.markdown(
-                    f'<div class="kolomkop" style="--kaartkleur:{kleur}">{stadium}'
-                    f'<br><span class="kolom-som">{len(sub)} · {helpers.euro(som)}</span></div>',
-                    unsafe_allow_html=True)
-                if sub.empty:
-                    continue
+                labels = []
                 for _, d in sub.iterrows():
+                    label = f"{d['titel']}  ·  {helpers.euro(d['waarde'])}   [#{int(d['id'])}]"
+                    labels.append(label)
+                    label_naar_id[label] = int(d["id"])
+                containers.append({"header": f"{stadium}   ({len(sub)} · {helpers.euro(som)})",
+                                   "items": labels})
+
+            resultaat = sort_items(containers, multi_containers=True,
+                                   custom_style=_sort_style(kolommen_namen), key="pipeline_bord")
+
+            if resultaat:
+                huidig_stadium = {}
+                if not deals.empty:
+                    huidig_stadium = dict(zip(deals["id"].astype(int), deals["stadium"]))
+                gewijzigd = []
+                for stadium, kolom in zip(kolommen_namen, resultaat):
+                    for label in kolom.get("items", []):
+                        deal_id = label_naar_id.get(label)
+                        if deal_id is not None and huidig_stadium.get(deal_id) != stadium:
+                            gewijzigd.append((deal_id, stadium))
+                if gewijzigd:
+                    for deal_id, nieuw_stadium in gewijzigd:
+                        helpers.wijzig_stadium(deal_id, nieuw_stadium)
+                    st.rerun()
+        else:
+            st.info("Sleepfunctie tijdelijk niet geladen (package installeert bij de eerstvolgende "
+                    "herstart). Gebruik ondertussen 'Deal verplaatsen' hieronder.")
+            for start in range(0, len(kolommen_namen), 4):
+                rij = kolommen_namen[start:start + 4]
+                cols = st.columns(len(rij))
+                for col, stadium in zip(cols, rij):
+                    sub = deals[deals["stadium"] == stadium] if not deals.empty else deals
+                    kleur = helpers.STADIUM_KLEUR.get(stadium, "#2338B0")
+                    som = sub["waarde"].fillna(0).sum() if not sub.empty else 0
                     col.markdown(
-                        f'<div class="kanban-kaart" style="--kaartkleur:{kleur}">'
-                        f'<b>{d["titel"]}</b><br>'
-                        f'<span class="kaart-meta">{d.get("organisatie") or "—"} · '
-                        f'{d.get("type_installatie") or ""}</span><br>'
-                        f'<span class="kaart-waarde">{helpers.euro(d["waarde"])}</span> '
-                        f'<span class="kaart-meta">· kans {int(d.get("kans") or 0)}%</span></div>',
+                        f'<div class="kolomkop" style="--kaartkleur:{kleur}">{stadium}'
+                        f'<br><span class="kolom-som">{len(sub)} · {helpers.euro(som)}</span></div>',
                         unsafe_allow_html=True)
+                    for _, d in sub.iterrows():
+                        col.markdown(
+                            f'<div class="kanban-kaart" style="--kaartkleur:{kleur}">'
+                            f'<b>{d["titel"]}</b><br>'
+                            f'<span class="kaart-meta">{d.get("organisatie") or "—"} · '
+                            f'{d.get("type_installatie") or ""}</span><br>'
+                            f'<span class="kaart-waarde">{helpers.euro(d["waarde"])}</span> '
+                            f'<span class="kaart-meta">· kans {int(d.get("kans") or 0)}%</span></div>',
+                            unsafe_allow_html=True)
 
         st.divider()
         st.subheader("Deal verplaatsen of verwijderen")
@@ -118,12 +204,14 @@ def toon():
                         stadium=stadium, prioriteit=prioriteit))
                     helpers.maak_vervolgactie(deal_id, stadium)
                     if sj_direct:
-                        sjabloon_dagen = dict(helpers.TAAK_SJABLONEN)
-                        for naam in sj_direct:
-                            db.voeg_toe("acties", dict(
-                                datum=(date.today() + timedelta(days=sjabloon_dagen[naam])).isoformat(),
-                                prioriteit="Normaal", organisatie_id=organisatie_id or None,
-                                deal_id=deal_id, actie=naam, status="Open"))
+                        cumulatief = date.today()
+                        for naam, dagen in helpers.TAAK_SJABLONEN:
+                            cumulatief += timedelta(days=dagen)
+                            if naam in sj_direct:
+                                db.voeg_toe("acties", dict(
+                                    datum=cumulatief.isoformat(),
+                                    prioriteit="Normaal", organisatie_id=organisatie_id or None,
+                                    deal_id=deal_id, actie=naam, status="Open"))
                     st.success("Deal aangemaakt (met automatische vervolgactie)"
                               + (f" + {len(sj_direct)} taken." if sj_direct else "."))
                     st.rerun()
@@ -224,19 +312,8 @@ def toon():
                         st.rerun()
 
         with st.expander("⚡ Taken uit sjabloon toevoegen aan deze deal"):
-            sj_start = st.date_input("Startdatum (referentiepunt)", value=date.today(), key="pipe_sj_start")
-            gekozen = {}
-            for naam, dagen in helpers.TAAK_SJABLONEN:
-                pc1, pc2 = st.columns([3, 1])
-                with pc1:
-                    aan = st.checkbox(naam, key=f"pipe_sj_check_{naam}")
-                with pc2:
-                    datum_veld = st.date_input(
-                        "Datum", value=sj_start + timedelta(days=dagen),
-                        key=f"pipe_sj_datum_{naam}", label_visibility="collapsed")
-                if aan:
-                    gekozen[naam] = datum_veld
-            if st.button("➕ Toevoegen aan deze deal", key="pipe_sj_toevoegen"):
+            gekozen = helpers.sjabloon_keten_ui("pipe_sj", key_suffix=f"_{keuze}")
+            if st.button("➕ Toevoegen aan deze deal", key=f"pipe_sj_toevoegen_{keuze}"):
                 if not gekozen:
                     st.error("Vink minstens één taak aan.")
                 else:

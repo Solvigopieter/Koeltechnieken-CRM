@@ -93,8 +93,9 @@ def toon():
                     st.rerun()
 
     with tab_sjablonen:
-        st.caption("Kies een deal en vink de taken aan die je nodig hebt — ze worden allemaal "
-                  "in één keer aangemaakt, elk met een logische standaarddatum (aanpasbaar).")
+        st.caption("Kies een deal en vink de taken aan die je nodig hebt. De datums vormen een "
+                  "keten: pas je er één aan, dan schuiven alle volgende automatisch mee. 🔒 = "
+                  "manueel vastgezet.")
         orgs = db.organisatie_opties()
         deals = db.deal_opties()
         c1, c2 = st.columns(2)
@@ -103,21 +104,9 @@ def toon():
         with c2:
             sj_org_id = st.selectbox("Organisatie (optioneel, indien geen deal)",
                                      list(orgs), format_func=orgs.get, key="sj_org")
-        sj_start = st.date_input("Startdatum (referentiepunt voor de sjablonen)", value=date.today(),
-                                 key="sj_start")
 
         st.markdown("**Taken**")
-        gekozen = {}
-        for naam, dagen in helpers.TAAK_SJABLONEN:
-            kc1, kc2 = st.columns([3, 1])
-            with kc1:
-                aan = st.checkbox(naam, key=f"sj_check_{naam}")
-            with kc2:
-                datum_veld = st.date_input(
-                    "Datum", value=sj_start + timedelta(days=dagen),
-                    key=f"sj_datum_{naam}", label_visibility="collapsed")
-            if aan:
-                gekozen[naam] = datum_veld
+        gekozen = helpers.sjabloon_keten_ui("sj")
 
         if st.button("➕ Geselecteerde taken toevoegen", type="primary"):
             if not gekozen:

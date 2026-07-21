@@ -61,21 +61,79 @@ OFFERTE_STATUSSEN = ["Concept", "Verstuurd", "Goedgekeurd", "Verloren", "Verlope
 JOB_STATUSSEN = ["Gepland", "Bezig", "Uitgevoerd", "Geannuleerd"]
 BTW_TARIEVEN = ["6%", "21%"]
 
-# (omschrijving, standaard aantal dagen vanaf vandaag) — voor het snel toevoegen
-# van meerdere herkenbare taken tegelijk bij een deal.
+# (omschrijving, aantal dagen NA DE VORIGE STAP in deze lijst — niet t.o.v. de
+# startdatum). Zo vormen ze een logische keten: pas je één datum aan, dan schuiven
+# alle volgende stappen automatisch mee door dezelfde tussenafstand aan te houden.
 TAAK_SJABLONEN = [
     ("Plaatsbezoek inplannen", 2),
-    ("Plaatsbezoek uitvoeren", 5),
-    ("Offerte opmaken in de offertegenerator", 8),
-    ("Offerte voorstellen aan klant", 9),
-    ("2de plaatsbezoek (opmeting/detail)", 12),
-    ("Offerte opvolgen", 16),
-    ("Materialen bestellen", 3),
-    ("Installatiedatum plannen met klant", 4),
-    ("Indienststelling & uitleg klant", 1),
-    ("Facturatie versturen", 2),
+    ("Plaatsbezoek uitvoeren", 3),
+    ("Offerte opmaken in de offertegenerator", 3),
+    ("Offerte voorstellen aan klant", 1),
+    ("Offerte opvolgen", 7),
+    ("2de plaatsbezoek (opmeting/detail)", 3),
+    ("Materialen bestellen", 2),
+    ("Installatiedatum plannen met klant", 1),
+    ("Indienststelling & uitleg klant", 5),
+    ("Facturatie versturen", 1),
     ("Onderhoudscontract voorstellen", 30),
 ]
+
+
+def sjabloon_keten_ui(prefix: str, key_suffix: str = ""):
+    """Toont de sjabloon-taken-checklist met een 'kettingreactie' voor de datums:
+    pas je één datum manueel aan, dan schuiven alle VOLGENDE (nog niet zelf
+    aangepaste) taken automatisch mee door dezelfde tussenafstand aan te houden.
+
+    Retourneert een dict {taaknaam: datum} van de AANGEVINKTE taken.
+    prefix: st.session_state-sleutel-voorvoegsel (uniek per plek waar dit gebruikt wordt).
+    """
+    import streamlit as st
+    from datetime import timedelta as _td
+
+    vergrendeld_key = f"{prefix}_vergrendeld{key_suffix}"
+    if vergrendeld_key not in st.session_state:
+        st.session_state[vergrendeld_key] = set()
+
+    kc1, kc2 = st.columns([3, 1])
+    with kc1:
+        sj_start = st.date_input("Startdatum (referentiepunt voor stap 1)",
+                                 key=f"{prefix}_start{key_suffix}")
+    with kc2:
+        st.write("")
+        st.write("")
+        if st.button("🔄 Herbereken keten", key=f"{prefix}_reset{key_suffix}",
+                    help="Zet alle datums terug op hun automatisch berekende waarde vanaf de startdatum."):
+            st.session_state[vergrendeld_key] = set()
+            for naam, _ in TAAK_SJABLONEN:
+                st.session_state.pop(f"{prefix}_datum_{naam}{key_suffix}", None)
+            st.rerun()
+
+    gekozen = {}
+    vorige_datum = sj_start
+    for naam, interval in TAAK_SJABLONEN:
+        datum_key = f"{prefix}_datum_{naam}{key_suffix}"
+        vergrendeld = naam in st.session_state[vergrendeld_key]
+        standaard = vorige_datum + _td(days=interval)
+        if not vergrendeld:
+            # niet-vergrendelde taken schuiven elke run mee met de keten
+            st.session_state[datum_key] = standaard
+
+        pc1, pc2, pc3 = st.columns([2.6, 1, 0.3])
+        with pc1:
+            aan = st.checkbox(naam, key=f"{prefix}_check_{naam}{key_suffix}")
+        with pc2:
+            def _vergrendel(n=naam):
+                st.session_state[vergrendeld_key].add(n)
+            datum_veld = st.date_input(
+                "Datum", key=datum_key, on_change=_vergrendel, label_visibility="collapsed")
+        with pc3:
+            if vergrendeld:
+                st.markdown("🔒")
+        if aan:
+            gekozen[naam] = datum_veld
+        vorige_datum = datum_veld
+
+    return gekozen
 
 
 # ---------- automatische acties ----------
