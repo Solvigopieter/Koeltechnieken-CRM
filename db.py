@@ -83,6 +83,17 @@ TABEL_KOLOMMEN: dict[str, list[str]] = {
     ],
 }
 
+# Kolommen die ECHTE getallen bevatten (dus veilig om als getal in te lezen).
+# Alle andere kolommen (telefoon, klantnummer, adres, ...) blijven altijd platte
+# tekst — anders verliest bv. een telefoonnummer "0471234567" zijn voorloopnul.
+NUMERIC_KOLOMMEN: dict[str, set[str]] = {
+    "installaties": {"bouwjaar", "btw_6_ok", "vermogen_kw", "plaatsingsjaar", "bestaand_toestel"},
+    "deals": {"waarde", "kans"},
+    "plaatsbezoeken": {"leidinglengte_m", "hoogtewerker"},
+    "offertes": {"totaalprijs"},
+    "onderhoudscontracten": {"prijs_per_beurt"},
+}
+
 STANDAARDEN: dict[str, dict[str, Any]] = {
     "organisaties": {
         "type": "Eindklant", "status": "Prospect", "relatietype": "Prospect",
@@ -419,6 +430,16 @@ def _sheet_records(tabel: str) -> list[dict]:
 
 
 def _als_sheet_waarde(waarde: Any) -> Any:
+    """Zet een Python-waarde om naar wat naar Google Sheets geschreven wordt.
+
+    Getallen met decimalen (float) worden bewust als LETTERLIJKE TEKST
+    weggeschreven, met een apostrof-voorvoegsel. Zonder dat trucje kan Google
+    Sheets (bij een Belgische/Nederlandse spreadsheet-locale, komma als
+    decimaalteken) een kommagetal als 4789.72 verkeerd inlezen: het
+    decimaalteken verdwijnt dan en er komt 478972 uit in plaats van 4789,72.
+    Gehele getallen (int) zijn hier niet gevoelig voor en blijven gewoon
+    een getal.
+    """
     if waarde is None:
         return ""
     try:
@@ -428,7 +449,32 @@ def _als_sheet_waarde(waarde: Any) -> Any:
         pass
     if isinstance(waarde, bool):
         return int(waarde)
+    if isinstance(waarde, float):
+        return f"'{waarde:.2f}"
     return waarde
+
+
+def _van_sheet_getal(waarde: Any) -> Any:
+    """Leest een mogelijk forced-text/apostrof-genoteerd getal terug in als
+    een echt getal (int of float). Niet-numerieke tekst blijft ongewijzigd."""
+    if isinstance(waarde, (int, float)):
+        return waarde
+    if not isinstance(waarde, str):
+        return waarde
+    tekst = waarde.strip().lstrip("'")
+    if tekst == "":
+        return waarde
+    try:
+        getal = float(tekst)
+        return int(getal) if getal.is_integer() else getal
+    except ValueError:
+        pass
+    # Vangnet voor reeds foutief opgeslagen Belgisch-genoteerde tekst ("4.789,72")
+    try:
+        getal = float(tekst.replace(".", "").replace(",", "."))
+        return int(getal) if getal.is_integer() else getal
+    except ValueError:
+        return waarde
 
 
 def _met_standaarden(tabel: str, data: dict) -> dict:
@@ -476,10 +522,19 @@ def _google_temp_sqlite() -> sqlite3.Connection:
         records = alle_records.get(tabel, [])
         if not records:
             continue
+        numeriek = NUMERIC_KOLOMMEN.get(tabel, set())
         plekken = ", ".join("?" for _ in kolommen)
         sql = f"INSERT INTO {tabel} ({', '.join(kolommen)}) VALUES ({plekken})"
         for record in records:
-            waarden = [None if record.get(k, "") == "" else record.get(k) for k in kolommen]
+            waarden = []
+            for k in kolommen:
+                v = record.get(k, "")
+                if v == "":
+                    waarden.append(None)
+                elif k == "id" or k in numeriek:
+                    waarden.append(_van_sheet_getal(v))
+                else:
+                    waarden.append(v)
             con.execute(sql, waarden)
     con.commit()
     return con
@@ -509,10 +564,14 @@ def _google_haal_rij(tabel: str, rij_id: int):
         rij_id_int = int(rij_id)
     except (TypeError, ValueError):
         return None
+    numeriek = NUMERIC_KOLOMMEN.get(tabel, set())
     for record in _sheet_records(tabel):
         try:
             if int(record.get("id") or 0) == rij_id_int:
-                return {k: (None if v == "" else v) for k, v in record.items()}
+                return {
+                    k: (None if v == "" else (_van_sheet_getal(v) if (k == "id" or k in numeriek) else v))
+                    for k, v in record.items()
+                }
         except (TypeError, ValueError):
             continue
     return None
