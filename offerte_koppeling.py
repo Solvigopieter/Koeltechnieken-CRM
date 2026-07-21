@@ -77,3 +77,25 @@ def payload_van(project: dict) -> dict:
 
 def ververs_cache():
     haal_generator_projecten.clear()
+
+
+def bedrag_van(project: dict) -> float:
+    """Leest 'totaal_incl' robuust uit, ongeacht of Google Sheets dit als een
+    echt getal, een Amerikaans-genoteerde tekst ('4789.72') of een
+    Belgisch-genoteerde tekst ('4.789,72') teruggeeft. Zonder deze correctie
+    kan '4.789,72' foutief als 478972 gelezen worden."""
+    waarde = project.get("totaal_incl")
+    if waarde is None or waarde == "":
+        return 0.0
+    if isinstance(waarde, (int, float)):
+        return float(waarde)
+    tekst = str(waarde).strip()
+    try:
+        return float(tekst)
+    except ValueError:
+        pass
+    # Belgisch/Europees formaat: punt = duizendtal-scheiding, komma = decimaal
+    try:
+        return float(tekst.replace(".", "").replace(",", "."))
+    except ValueError:
+        return 0.0

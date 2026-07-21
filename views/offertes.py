@@ -104,11 +104,36 @@ def toon():
                     geimporteerd = pid in al_geimporteerd
                     with st.expander(
                         f"{'✅ ' if geimporteerd else ''}{p.get('datum')} — {p.get('type')} — "
-                        f"{p.get('klant')} — {helpers.euro(p.get('totaal_incl'))}"
+                        f"{p.get('klant')} — {helpers.euro(offerte_koppeling.bedrag_van(p))}"
                     ):
                         if geimporteerd:
                             st.success("Al geïmporteerd in het CRM.")
                             continue
+
+                        with st.expander("⚡ Nieuwe klant + deal in 1 klik aanmaken "
+                                         "(handig — de meeste HVAC-klanten bestaan nog niet in het CRM)"):
+                            st.caption("Maakt een organisatie (type 'Eindklant') en een deal aan, "
+                                      "gebaseerd op deze offerte, en koppelt ze meteen hieronder.")
+                            snel_naam = st.text_input("Klantnaam", value=str(p.get("klant") or ""),
+                                                      key=f"gen_snelnaam_{pid}")
+                            if st.button("➕ Klant + deal aanmaken", key=f"gen_snelmaak_{pid}"):
+                                if not snel_naam.strip():
+                                    st.error("Vul een klantnaam in.")
+                                else:
+                                    nieuw_org_id = db.voeg_toe("organisaties", dict(
+                                        naam=snel_naam.strip(), type="Eindklant",
+                                        status="Actief", relatietype="Eenmalige klant"))
+                                    nieuwe_deal_id = db.voeg_toe("deals", dict(
+                                        titel=f"{p.get('type') or 'Offerte'} — {snel_naam.strip()}",
+                                        type_installatie=p.get("type") or "Airco",
+                                        organisatie_id=nieuw_org_id,
+                                        waarde=offerte_koppeling.bedrag_van(p),
+                                        kans=70, stadium="Offerte verstuurd", prioriteit="Normaal",
+                                        bron="Offertegenerator"))
+                                    st.session_state[f"gen_deal_{pid}"] = nieuwe_deal_id
+                                    st.success(f"Klant en deal aangemaakt — automatisch gekoppeld.")
+                                    st.rerun()
+
                         c1, c2 = st.columns(2)
                         with c1:
                             deal_id = st.selectbox("Koppel aan deal", list(deals),
@@ -125,7 +150,7 @@ def toon():
                             db.voeg_toe("offertes", dict(
                                 deal_id=deal_id or None, installatie_id=installatie_id or None,
                                 nummer=f"GEN-{pid}", type=p.get("type"),
-                                totaalprijs=float(p.get("totaal_incl") or 0),
+                                totaalprijs=offerte_koppeling.bedrag_van(p),
                                 status=status, datum=str(p.get("datum") or ""),
                                 bron="Generator", generator_id=pid,
                                 opmerkingen=f"Geïmporteerd uit offertegenerator (klant: {p.get('klant')})"))
