@@ -18,7 +18,7 @@ import json
 
 import streamlit as st
 
-PROJECT_HEADERS = ["id", "datum", "type", "klant", "totaal_incl", "payload"]
+PROJECT_HEADERS = ["id", "datum", "type", "klant", "totaal_incl", "mat_inkoop", "netto_winst", "payload"]
 
 
 def offerte_app_url() -> str:
@@ -79,13 +79,13 @@ def ververs_cache():
     haal_generator_projecten.clear()
 
 
-def bedrag_van(project: dict) -> float:
-    """Leest 'totaal_incl' robuust uit, ongeacht of Google Sheets dit als een
-    echt getal, platte tekst ('4789.72'), tekst met een apostrof-voorvoegsel
-    ("'4789.72" — zo schrijft de generator het bewust weg om Sheets-locale-
-    corruptie te voorkomen), of Belgisch-genoteerde tekst ('4.789,72')
-    teruggeeft. Zonder deze correctie kan het bedrag foutief gelezen worden."""
-    waarde = project.get("totaal_incl")
+def bedrag_van(project: dict, veld: str = "totaal_incl") -> float:
+    """Leest een geldveld ('totaal_incl', 'mat_inkoop' of 'netto_winst') robuust
+    uit, ongeacht of Google Sheets dit als een echt getal, platte tekst
+    ('4789.72'), tekst met een apostrof-voorvoegsel ("'4789.72" — zo schrijft
+    de generator het bewust weg om Sheets-locale-corruptie te voorkomen), of
+    Belgisch-genoteerde tekst ('4.789,72') teruggeeft."""
+    waarde = project.get(veld)
     if waarde is None or waarde == "":
         return 0.0
     if isinstance(waarde, (int, float)):

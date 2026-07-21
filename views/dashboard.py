@@ -17,6 +17,7 @@ def toon():
     onderhoud = db.query_df(
         "SELECT c.*, o.naam AS organisatie FROM onderhoudscontracten c "
         "LEFT JOIN organisaties o ON o.id = c.organisatie_id")
+    offertes = db.query_df("SELECT * FROM offertes WHERE status IN ('Verstuurd', 'Goedgekeurd')")
 
     open_deals = deals[~deals["stadium"].isin(["Afgerond", "Verloren"])] if not deals.empty else deals
     open_acties = acties[acties["status"].isin(["Open", "Bezig"])] if not acties.empty else acties
@@ -24,6 +25,8 @@ def toon():
     pipeline_waarde = open_deals["waarde"].fillna(0).sum() if not open_deals.empty else 0
     gewogen = (open_deals["waarde"].fillna(0) * open_deals["kans"].fillna(0) / 100).sum() if not open_deals.empty else 0
     actieve_contracten = onderhoud[onderhoud["status"] == "Actief"] if not onderhoud.empty else onderhoud
+    materiaalkost_totaal = offertes["materiaalkost"].fillna(0).sum() if not offertes.empty else 0
+    nettowinst_totaal = offertes["nettowinst"].fillna(0).sum() if not offertes.empty else 0
 
     k1, k2, k3, k4, k5 = st.columns(5)
     helpers.stat_tegel(k1, len(open_deals), "Open deals")
@@ -31,6 +34,10 @@ def toon():
     helpers.stat_tegel(k3, helpers.euro(gewogen), "Gewogen (kans %)")
     helpers.stat_tegel(k4, len(telaat), "Acties te laat", alert=len(telaat) > 0)
     helpers.stat_tegel(k5, len(actieve_contracten), "Actieve onderhoudscontracten")
+
+    k6, k7 = st.columns(2)
+    helpers.stat_tegel(k6, helpers.euro(materiaalkost_totaal), "Materiaalkost (verstuurd + goedgekeurd)")
+    helpers.stat_tegel(k7, helpers.euro(nettowinst_totaal), "Nettowinst (verstuurd + goedgekeurd)")
 
     st.write("")
     links, rechts = st.columns([1.2, 1])

@@ -43,10 +43,18 @@ def toon():
                 st.info("Geen offertes met deze filters.")
             else:
                 toon_df = sub[["nummer", "type", "deal", "installatie", "totaalprijs",
+                               "materiaalkost", "nettowinst",
                                "btw_tarief", "status", "datum", "bron"]].copy()
                 toon_df["totaalprijs"] = toon_df["totaalprijs"].apply(helpers.euro)
+                toon_df["materiaalkost"] = toon_df["materiaalkost"].apply(helpers.euro)
+                toon_df["nettowinst"] = toon_df["nettowinst"].apply(helpers.euro)
                 st.dataframe(toon_df, use_container_width=True, hide_index=True)
                 helpers.export_knop(sub, "offertes.xlsx")
+                totaal_materiaal = sub["materiaalkost"].fillna(0).sum()
+                totaal_netto = sub["nettowinst"].fillna(0).sum()
+                m1, m2 = st.columns(2)
+                m1.metric("Totale materiaalkost (getoonde offertes)", helpers.euro(totaal_materiaal))
+                m2.metric("Totale nettowinst (getoonde offertes)", helpers.euro(totaal_netto))
 
                 st.divider()
                 st.subheader("Status snel aanpassen")
@@ -97,15 +105,19 @@ def toon():
                                          if f.get("type") in helpers.DEAL_TYPES else 0)
                     deal_id = st.selectbox("Deal", list(deals), format_func=deals.get,
                                            index=helpers.sleutel_uit_opties(deals, f.get("deal_id")))
-                with c2:
-                    totaalprijs = st.number_input("Totaal incl. BTW (EUR)", min_value=0.0, step=10.0,
-                                                  value=float(f.get("totaalprijs") or 0))
-                    btw_tarief = st.selectbox("BTW-tarief", helpers.BTW_TARIEVEN,
-                                              index=helpers.BTW_TARIEVEN.index(f.get("btw_tarief"))
-                                              if f.get("btw_tarief") in helpers.BTW_TARIEVEN else 0)
                     installatie_id = st.selectbox("Installatie-adres", list(installaties),
                                                   format_func=installaties.get,
                                                   index=helpers.sleutel_uit_opties(installaties, f.get("installatie_id")))
+                with c2:
+                    totaalprijs = st.number_input("Totaal incl. BTW (EUR)", min_value=0.0, step=10.0,
+                                                  value=float(f.get("totaalprijs") or 0))
+                    materiaalkost = st.number_input("Materiaalkost (inkoop, EUR)", min_value=0.0, step=10.0,
+                                                    value=float(f.get("materiaalkost") or 0))
+                    nettowinst = st.number_input("Nettowinst (EUR)", min_value=0.0, step=10.0,
+                                                 value=float(f.get("nettowinst") or 0))
+                    btw_tarief = st.selectbox("BTW-tarief", helpers.BTW_TARIEVEN,
+                                              index=helpers.BTW_TARIEVEN.index(f.get("btw_tarief"))
+                                              if f.get("btw_tarief") in helpers.BTW_TARIEVEN else 0)
                 status = st.selectbox("Status", helpers.OFFERTE_STATUSSEN,
                                       index=helpers.OFFERTE_STATUSSEN.index(f.get("status"))
                                       if f.get("status") in helpers.OFFERTE_STATUSSEN else 0)
@@ -117,6 +129,7 @@ def toon():
                 db.werk_bij("offertes", int(keuze), dict(
                     nummer=nummer, type=otype, deal_id=deal_id or None,
                     installatie_id=installatie_id or None, totaalprijs=totaalprijs,
+                    materiaalkost=materiaalkost, nettowinst=nettowinst,
                     btw_tarief=btw_tarief, status=status, opmerkingen=opmerkingen))
                 st.success("Offerte bijgewerkt.")
                 st.rerun()
@@ -230,7 +243,9 @@ def toon():
                             db.voeg_toe("offertes", dict(
                                 deal_id=deal_id or None, installatie_id=installatie_id or None,
                                 nummer=f"GEN-{pid}", type=p.get("type"),
-                                totaalprijs=offerte_koppeling.bedrag_van(p),
+                                totaalprijs=offerte_koppeling.bedrag_van(p, "totaal_incl"),
+                                materiaalkost=offerte_koppeling.bedrag_van(p, "mat_inkoop"),
+                                nettowinst=offerte_koppeling.bedrag_van(p, "netto_winst"),
                                 status=status, datum=str(p.get("datum") or ""),
                                 bron="Generator", generator_id=pid,
                                 opmerkingen=f"Geïmporteerd uit offertegenerator (klant: {p.get('klant')})"))

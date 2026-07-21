@@ -61,6 +61,22 @@ OFFERTE_STATUSSEN = ["Concept", "Verstuurd", "Goedgekeurd", "Verloren", "Verlope
 JOB_STATUSSEN = ["Gepland", "Bezig", "Uitgevoerd", "Geannuleerd"]
 BTW_TARIEVEN = ["6%", "21%"]
 
+# (omschrijving, standaard aantal dagen vanaf vandaag) — voor het snel toevoegen
+# van meerdere herkenbare taken tegelijk bij een deal.
+TAAK_SJABLONEN = [
+    ("Plaatsbezoek inplannen", 2),
+    ("Plaatsbezoek uitvoeren", 5),
+    ("Offerte opmaken in de offertegenerator", 8),
+    ("Offerte voorstellen aan klant", 9),
+    ("2de plaatsbezoek (opmeting/detail)", 12),
+    ("Offerte opvolgen", 16),
+    ("Materialen bestellen", 3),
+    ("Installatiedatum plannen met klant", 4),
+    ("Indienststelling & uitleg klant", 1),
+    ("Facturatie versturen", 2),
+    ("Onderhoudscontract voorstellen", 30),
+]
+
 
 # ---------- automatische acties ----------
 

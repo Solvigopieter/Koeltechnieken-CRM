@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import streamlit as st
 
@@ -9,7 +9,8 @@ import helpers
 def toon():
     st.title("Actieblad")
 
-    tab_lijst, tab_nieuw = st.tabs(["📋 Acties", "➕ Nieuwe actie"])
+    tab_lijst, tab_nieuw, tab_sjablonen = st.tabs(
+        ["📋 Acties", "➕ Nieuwe actie", "⚡ Meerdere taken uit sjabloon"])
 
     acties = db.query_df(
         "SELECT a.*, o.naam AS organisatie, d.titel AS deal FROM acties a "
@@ -90,3 +91,42 @@ def toon():
                         actie=actie.strip(), status="Open"))
                     st.success("Actie toegevoegd.")
                     st.rerun()
+
+    with tab_sjablonen:
+        st.caption("Kies een deal en vink de taken aan die je nodig hebt — ze worden allemaal "
+                  "in één keer aangemaakt, elk met een logische standaarddatum (aanpasbaar).")
+        orgs = db.organisatie_opties()
+        deals = db.deal_opties()
+        c1, c2 = st.columns(2)
+        with c1:
+            sj_deal_id = st.selectbox("Deal", list(deals), format_func=deals.get, key="sj_deal")
+        with c2:
+            sj_org_id = st.selectbox("Organisatie (optioneel, indien geen deal)",
+                                     list(orgs), format_func=orgs.get, key="sj_org")
+        sj_start = st.date_input("Startdatum (referentiepunt voor de sjablonen)", value=date.today(),
+                                 key="sj_start")
+
+        st.markdown("**Taken**")
+        gekozen = {}
+        for naam, dagen in helpers.TAAK_SJABLONEN:
+            kc1, kc2 = st.columns([3, 1])
+            with kc1:
+                aan = st.checkbox(naam, key=f"sj_check_{naam}")
+            with kc2:
+                datum_veld = st.date_input(
+                    "Datum", value=sj_start + timedelta(days=dagen),
+                    key=f"sj_datum_{naam}", label_visibility="collapsed")
+            if aan:
+                gekozen[naam] = datum_veld
+
+        if st.button("➕ Geselecteerde taken toevoegen", type="primary"):
+            if not gekozen:
+                st.error("Vink minstens één taak aan.")
+            else:
+                for naam, datum_veld in gekozen.items():
+                    db.voeg_toe("acties", dict(
+                        datum=datum_veld.isoformat(), prioriteit="Normaal",
+                        organisatie_id=sj_org_id or None, deal_id=sj_deal_id or None,
+                        actie=naam, status="Open"))
+                st.success(f"{len(gekozen)} taken toegevoegd.")
+                st.rerun()

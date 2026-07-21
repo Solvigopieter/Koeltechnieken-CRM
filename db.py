@@ -64,7 +64,7 @@ TABEL_KOLOMMEN: dict[str, list[str]] = {
     "offertes": [
         "id", "deal_id", "installatie_id", "nummer", "type", "totaalprijs",
         "btw_tarief", "status", "datum", "opmerkingen", "bron", "generator_id",
-        "pdf_bestandsnaam",
+        "pdf_bestandsnaam", "materiaalkost", "nettowinst",
     ],
     "jobs": [
         "id", "deal_id", "installatie_id", "datum", "team", "toestellen",
@@ -90,7 +90,7 @@ NUMERIC_KOLOMMEN: dict[str, set[str]] = {
     "installaties": {"bouwjaar", "btw_6_ok", "vermogen_kw", "plaatsingsjaar", "bestaand_toestel"},
     "deals": {"waarde", "kans"},
     "plaatsbezoeken": {"leidinglengte_m", "hoogtewerker"},
-    "offertes": {"totaalprijs"},
+    "offertes": {"totaalprijs", "materiaalkost", "nettowinst"},
     "onderhoudscontracten": {"prijs_per_beurt"},
 }
 
@@ -210,7 +210,8 @@ CREATE TABLE IF NOT EXISTS offertes (
     opmerkingen TEXT,
     bron TEXT DEFAULT 'CRM',
     generator_id TEXT,
-    pdf_bestandsnaam TEXT
+    pdf_bestandsnaam TEXT,
+    materiaalkost REAL, nettowinst REAL
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
