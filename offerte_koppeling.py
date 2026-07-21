@@ -81,15 +81,16 @@ def ververs_cache():
 
 def bedrag_van(project: dict) -> float:
     """Leest 'totaal_incl' robuust uit, ongeacht of Google Sheets dit als een
-    echt getal, een Amerikaans-genoteerde tekst ('4789.72') of een
-    Belgisch-genoteerde tekst ('4.789,72') teruggeeft. Zonder deze correctie
-    kan '4.789,72' foutief als 478972 gelezen worden."""
+    echt getal, platte tekst ('4789.72'), tekst met een apostrof-voorvoegsel
+    ("'4789.72" — zo schrijft de generator het bewust weg om Sheets-locale-
+    corruptie te voorkomen), of Belgisch-genoteerde tekst ('4.789,72')
+    teruggeeft. Zonder deze correctie kan het bedrag foutief gelezen worden."""
     waarde = project.get("totaal_incl")
     if waarde is None or waarde == "":
         return 0.0
     if isinstance(waarde, (int, float)):
         return float(waarde)
-    tekst = str(waarde).strip()
+    tekst = str(waarde).strip().lstrip("'")
     try:
         return float(tekst)
     except ValueError:
