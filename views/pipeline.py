@@ -5,52 +5,6 @@ import streamlit as st
 import db
 import helpers
 
-try:
-    from streamlit_sortables import sort_items
-    SLEPEN_BESCHIKBAAR = True
-except ImportError:
-    SLEPEN_BESCHIKBAAR = False
-
-
-# Simpele, rustige stijl voor het sleepbare bord (past bij de rest van de app)
-_SORT_STYLE = """
-.sortable-component {
-    font-family: 'Inter', sans-serif;
-}
-.sortable-container {
-    background: #F1F3F6;
-    border: 1px solid #E8EAEE;
-    border-radius: 8px;
-    min-height: 90px;
-}
-.sortable-container-header {
-    font-size: 0.72rem;
-    font-weight: 700;
-    color: #374151;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    background: #F1F3F6;
-    padding: 8px 10px;
-    border-radius: 8px 8px 0 0;
-}
-.sortable-container-body {
-    padding: 6px;
-}
-.sortable-item {
-    background: #FFFFFF;
-    border: 1px solid #E8EAEE;
-    border-radius: 6px;
-    padding: 8px 10px;
-    margin-bottom: 6px;
-    font-size: 0.82rem;
-    color: #16204E;
-    cursor: grab;
-}
-.sortable-item:hover {
-    box-shadow: 0 2px 6px rgba(22,32,78,0.10);
-}
-"""
-
 
 def toon():
     st.title("Pipeline")
@@ -67,65 +21,29 @@ def toon():
         toon_afgerond = st.toggle("Toon ook Afgerond / Verloren", value=False)
         kolommen_namen = helpers.STADIUM_NAMEN if toon_afgerond else actief
 
-        if not SLEPEN_BESCHIKBAAR:
-            st.info("Sleepfunctie niet beschikbaar (package 'streamlit-sortables' ontbreekt "
-                    "— staat wel in requirements.txt, dus dit lost zich op na de eerstvolgende "
-                    "herstart/redeploy). Gebruik ondertussen 'Deal verplaatsen' hieronder.")
-
-        if SLEPEN_BESCHIKBAAR:
-            st.caption("🖱️ Sleep een kaart naar een andere kolom om het stadium te wijzigen.")
-            label_naar_id = {}
-            containers = []
-            for stadium in kolommen_namen:
+        # kolommen in rijen van 4 zodat het leesbaar blijft
+        for start in range(0, len(kolommen_namen), 4):
+            rij = kolommen_namen[start:start + 4]
+            cols = st.columns(len(rij))
+            for col, stadium in zip(cols, rij):
                 sub = deals[deals["stadium"] == stadium] if not deals.empty else deals
+                kleur = helpers.STADIUM_KLEUR.get(stadium, "#2338B0")
                 som = sub["waarde"].fillna(0).sum() if not sub.empty else 0
-                labels = []
+                col.markdown(
+                    f'<div class="kolomkop" style="--kaartkleur:{kleur}">{stadium}'
+                    f'<br><span class="kolom-som">{len(sub)} · {helpers.euro(som)}</span></div>',
+                    unsafe_allow_html=True)
+                if sub.empty:
+                    continue
                 for _, d in sub.iterrows():
-                    label = f"{d['titel']} · {helpers.euro(d['waarde'])}  [#{int(d['id'])}]"
-                    labels.append(label)
-                    label_naar_id[label] = int(d["id"])
-                containers.append({"header": f"{stadium}  ({len(sub)} · {helpers.euro(som)})",
-                                   "items": labels})
-
-            resultaat = sort_items(containers, multi_containers=True, custom_style=_SORT_STYLE,
-                                   key="pipeline_bord")
-
-            if resultaat:
-                huidig_stadium = {}
-                if not deals.empty:
-                    huidig_stadium = dict(zip(deals["id"].astype(int), deals["stadium"]))
-                gewijzigd = []
-                for stadium, kolom in zip(kolommen_namen, resultaat):
-                    for label in kolom.get("items", []):
-                        deal_id = label_naar_id.get(label)
-                        if deal_id is None:
-                            continue
-                        if huidig_stadium.get(deal_id) != stadium:
-                            gewijzigd.append((deal_id, stadium))
-                if gewijzigd:
-                    for deal_id, nieuw_stadium in gewijzigd:
-                        helpers.wijzig_stadium(deal_id, nieuw_stadium)
-                    st.rerun()
-        else:
-            # Terugvalweergave zonder drag & drop (enkel als het package niet geladen kon worden)
-            for start in range(0, len(kolommen_namen), 4):
-                rij = kolommen_namen[start:start + 4]
-                cols = st.columns(len(rij))
-                for col, stadium in zip(cols, rij):
-                    sub = deals[deals["stadium"] == stadium] if not deals.empty else deals
-                    kleur = helpers.STADIUM_KLEUR.get(stadium, "#2338B0")
-                    som = sub["waarde"].fillna(0).sum() if not sub.empty else 0
                     col.markdown(
-                        f'<div class="kolomkop" style="--kaartkleur:{kleur}">{stadium}'
-                        f'<br><span class="kolom-som">{len(sub)} · {helpers.euro(som)}</span></div>',
+                        f'<div class="kanban-kaart" style="--kaartkleur:{kleur}">'
+                        f'<b>{d["titel"]}</b><br>'
+                        f'<span class="kaart-meta">{d.get("organisatie") or "—"} · '
+                        f'{d.get("type_installatie") or ""}</span><br>'
+                        f'<span class="kaart-waarde">{helpers.euro(d["waarde"])}</span> '
+                        f'<span class="kaart-meta">· kans {int(d.get("kans") or 0)}%</span></div>',
                         unsafe_allow_html=True)
-                    for _, d in sub.iterrows():
-                        col.markdown(
-                            f'<div class="kanban-kaart" style="--kaartkleur:{kleur}">'
-                            f'<b>{d["titel"]}</b><br>'
-                            f'<span class="kaart-meta">{d.get("organisatie") or "—"}</span><br>'
-                            f'<span class="kaart-waarde">{helpers.euro(d["waarde"])}</span></div>',
-                            unsafe_allow_html=True)
 
         st.divider()
         st.subheader("Deal verplaatsen of verwijderen")
