@@ -63,20 +63,27 @@ def _sort_style(kolommen_namen):
 def toon():
     st.title("Pipeline")
 
-    tab_bord, tab_nieuw, tab_bewerk = st.tabs(["📋 Bord", "➕ Nieuwe deal", "✏️ Bewerken & taken"])
+    if "pipeline_sectie" not in st.session_state:
+        st.session_state["pipeline_sectie"] = "📋 Bord"
+
+    sectie = st.radio("Sectie", ["📋 Bord", "➕ Nieuwe deal", "✏️ Bewerken & taken"],
+                      key="pipeline_sectie", horizontal=True, label_visibility="collapsed")
+    st.divider()
 
     deals = db.query_df(
         "SELECT d.*, o.naam AS organisatie FROM deals d "
         "LEFT JOIN organisaties o ON o.id = d.organisatie_id ORDER BY d.gewijzigd DESC")
 
     # ---------------- bord ----------------
-    with tab_bord:
+    if sectie == "📋 Bord":
         actief = [s for s in helpers.STADIUM_NAMEN if s not in ("Afgerond", "Verloren")]
         toon_afgerond = st.toggle("Toon ook Afgerond / Verloren", value=False)
         kolommen_namen = helpers.STADIUM_NAMEN if toon_afgerond else actief
 
         if SLEPEN_BESCHIKBAAR:
-            st.caption("🖱️ Sleep een kaart naar een andere kolom om het stadium meteen te wijzigen.")
+            st.caption("🖱️ Sleep een kaart naar een andere kolom om het stadium meteen te wijzigen. "
+                      "Gebruik 'Open taken van deze deal' hieronder om de taken van een deal te bekijken "
+                      "(een kaart zelf aanklikken kan niet, dat zou het slepen verstoren).")
             label_naar_id = {}
             containers = []
             for stadium in kolommen_namen:
@@ -132,12 +139,12 @@ def toon():
                             unsafe_allow_html=True)
 
         st.divider()
-        st.subheader("Deal verplaatsen of verwijderen")
+        st.subheader("Deal verplaatsen, openen of verwijderen")
         st.caption("Werkt ook zonder slepen — bv. handig op mobiel, of om snel een test-deal op te ruimen.")
         if deals.empty:
             st.info("Nog geen deals.")
         else:
-            c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
+            c1, c2, c3, c4, c5 = st.columns([2, 1.6, 1, 1, 1])
             with c1:
                 keuze = st.selectbox(
                     "Deal", deals["id"].tolist(),
@@ -158,6 +165,15 @@ def toon():
             with c4:
                 st.write("")
                 st.write("")
+                if st.button("🗒️ Open taken", use_container_width=True,
+                            help="Springt naar 'Bewerken & taken' voor deze deal, met het sjabloon meteen open."):
+                    st.session_state["deal_bewerk_keuze"] = int(keuze)
+                    st.session_state["pipe_sj_open_vanuit_bord"] = True
+                    st.session_state["pipeline_sectie"] = "✏️ Bewerken & taken"
+                    st.rerun()
+            with c5:
+                st.write("")
+                st.write("")
                 if st.button("🗑️ Verwijder", use_container_width=True,
                             help="Verwijdert deze deal meteen — handig om test-deals op te ruimen."):
                     db.verwijder("deals", int(keuze))
@@ -165,7 +181,7 @@ def toon():
                     st.rerun()
 
     # ---------------- nieuw ----------------
-    with tab_nieuw:
+    elif sectie == "➕ Nieuwe deal":
         orgs = db.organisatie_opties()
         installaties = db.installatie_opties()
         with st.form("deal_nieuw"):
@@ -217,7 +233,7 @@ def toon():
                     st.rerun()
 
     # ---------------- bewerken & taken ----------------
-    with tab_bewerk:
+    else:
         if deals.empty:
             st.info("Nog geen deals.")
             return
@@ -311,7 +327,8 @@ def toon():
                         db.werk_bij("acties", int(a["id"]), {"status": nieuw_status})
                         st.rerun()
 
-        with st.expander("⚡ Taken uit sjabloon toevoegen aan deze deal"):
+        open_vanuit_bord = st.session_state.pop("pipe_sj_open_vanuit_bord", False)
+        with st.expander("⚡ Taken uit sjabloon toevoegen aan deze deal", expanded=open_vanuit_bord):
             gekozen = helpers.sjabloon_keten_ui("pipe_sj", key_suffix=f"_{keuze}")
             if st.button("➕ Toevoegen aan deze deal", key=f"pipe_sj_toevoegen_{keuze}"):
                 if not gekozen:
