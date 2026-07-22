@@ -536,7 +536,16 @@ def _google_temp_sqlite() -> sqlite3.Connection:
                     waarden.append(_van_sheet_getal(v))
                 else:
                     waarden.append(v)
-            con.execute(sql, waarden)
+            try:
+                con.execute(sql, waarden)
+            except sqlite3.IntegrityError:
+                # Eén onvolledige/kapotte rij (bv. een leeg verplicht veld zoals
+                # 'datum' of 'actie') mag NOOIT de volledige app platleggen — alle
+                # andere tabellen en rijen moeten gewoon blijven werken. Deze ene
+                # rij wordt overgeslagen; de brondata in de Sheet blijft intact,
+                # enkel deze rij verschijnt niet in de CRM-weergave tot ze
+                # hersteld is (bv. het lege veld invullen in Google Sheets zelf).
+                continue
     con.commit()
     return con
 
