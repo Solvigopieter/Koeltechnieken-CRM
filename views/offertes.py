@@ -131,7 +131,10 @@ def toon():
                     installatie_id=installatie_id or None, totaalprijs=totaalprijs,
                     materiaalkost=materiaalkost, nettowinst=nettowinst,
                     btw_tarief=btw_tarief, status=status, opmerkingen=opmerkingen))
-                st.success("Offerte bijgewerkt.")
+                if deal_id:
+                    db.werk_bij("deals", int(deal_id), {"waarde": totaalprijs})
+                st.success("Offerte bijgewerkt"
+                          + (" — deal-waarde bijgewerkt naar dit bedrag." if deal_id else "."))
                 st.rerun()
             if weg:
                 db.verwijder("offertes", int(keuze))
@@ -240,18 +243,24 @@ def toon():
                                               key=f"gen_status_{pid}")
                         if st.button("⬇️ Importeer als offerte", key=f"gen_import_{pid}",
                                      type="primary"):
+                            bedrag = offerte_koppeling.bedrag_van(p, "totaal_incl")
                             db.voeg_toe("offertes", dict(
                                 deal_id=deal_id or None, installatie_id=installatie_id or None,
                                 nummer=f"GEN-{pid}", type=p.get("type"),
-                                totaalprijs=offerte_koppeling.bedrag_van(p, "totaal_incl"),
+                                totaalprijs=bedrag,
                                 materiaalkost=offerte_koppeling.bedrag_van(p, "mat_inkoop"),
                                 nettowinst=offerte_koppeling.bedrag_van(p, "netto_winst"),
                                 status=status, datum=str(p.get("datum") or ""),
                                 bron="Generator", generator_id=pid,
                                 opmerkingen=f"Geïmporteerd uit offertegenerator (klant: {p.get('klant')})"))
-                            if deal_id and status == "Verstuurd":
-                                helpers.wijzig_stadium(int(deal_id), "Offerte verstuurd")
-                            st.success("Offerte geïmporteerd.")
+                            if deal_id:
+                                # Deal-waarde meteen op het offertebedrag zetten — anders
+                                # blijft de deal op €0 staan, ook al hangt er een offerte aan.
+                                db.werk_bij("deals", int(deal_id), {"waarde": bedrag})
+                                if status == "Verstuurd":
+                                    helpers.wijzig_stadium(int(deal_id), "Offerte verstuurd")
+                            st.success("Offerte geïmporteerd"
+                                      + (" — deal-waarde bijgewerkt naar dit bedrag." if deal_id else "."))
                             st.rerun()
 
     # ---------------- handmatig ----------------
@@ -277,5 +286,8 @@ def toon():
                     deal_id=deal_id or None, installatie_id=installatie_id or None,
                     nummer=nummer, type=otype, totaalprijs=totaalprijs,
                     btw_tarief=btw_tarief, status=status, opmerkingen=opmerkingen, bron="CRM"))
-                st.success("Offerte toegevoegd.")
+                if deal_id:
+                    db.werk_bij("deals", int(deal_id), {"waarde": totaalprijs})
+                st.success("Offerte toegevoegd"
+                          + (" — deal-waarde bijgewerkt naar dit bedrag." if deal_id else "."))
                 st.rerun()
