@@ -4,6 +4,7 @@ import streamlit as st
 
 import db
 import helpers
+import offerte_koppeling
 
 try:
     from streamlit_sortables import sort_items
@@ -299,6 +300,76 @@ def toon():
             db.verwijder("deals", int(keuze))
             st.success("Deal verwijderd.")
             st.rerun()
+
+        # ---- Offerte koppelen aan deze deal ----
+        st.divider()
+        st.subheader(f"🔗 Offerte voor '{d.get('titel', '')}'")
+
+        alle_offertes = db.query_df(
+            "SELECT f.*, dl.titel AS deal_titel FROM offertes f "
+            "LEFT JOIN deals dl ON dl.id = f.deal_id ORDER BY f.datum DESC")
+        gekoppeld = alle_offertes[alle_offertes["deal_id"] == int(keuze)] if not alle_offertes.empty else alle_offertes
+
+        if not gekoppeld.empty:
+            for _, f in gekoppeld.iterrows():
+                st.markdown(
+                    f'<div class="kanban-kaart" style="--kaartkleur:#1E8E5A">'
+                    f'<b>{f["nummer"]}</b> — {helpers.euro(f["totaalprijs"])}<br>'
+                    f'<span class="kaart-meta">Status: {f["status"]} · Bron: {f.get("bron") or "—"}</span></div>',
+                    unsafe_allow_html=True)
+        else:
+            st.caption("Nog geen offerte gekoppeld aan deze deal.")
+
+        with st.expander("🔗 Offerte koppelen aan deze deal", expanded=gekoppeld.empty):
+            keuzeopties = []
+            # 1) Nog niet geïmporteerde projecten uit de offertegenerator
+            if offerte_koppeling.koppeling_beschikbaar():
+                al_geimporteerd = set(alle_offertes["generator_id"].dropna().astype(str)) if not alle_offertes.empty else set()
+                for p in offerte_koppeling.haal_generator_projecten():
+                    pid = str(p.get("id"))
+                    if pid not in al_geimporteerd:
+                        bedrag = offerte_koppeling.bedrag_van(p, "totaal_incl")
+                        keuzeopties.append((
+                            f"📤 Uit generator — {p.get('datum')} — {p.get('klant')} — {helpers.euro(bedrag)}",
+                            ("generator", p)))
+            # 2) Bestaande CRM-offertes die aan een ANDERE deal (of geen deal) hangen
+            if not alle_offertes.empty:
+                for _, f in alle_offertes.iterrows():
+                    if f["deal_id"] == int(keuze):
+                        continue
+                    huidige_koppeling = f" (nu bij: {f['deal_titel']})" if f.get("deal_titel") else " (nog niet gekoppeld)"
+                    keuzeopties.append((
+                        f"📋 {f['nummer']} — {helpers.euro(f['totaalprijs'])}{huidige_koppeling}",
+                        ("bestaand", int(f["id"]))))
+
+            if not keuzeopties:
+                st.caption("Geen andere offertes beschikbaar om te koppelen.")
+            else:
+                labels = [k[0] for k in keuzeopties]
+                gekozen_label = st.selectbox("Kies een offerte", labels, key=f"link_offerte_{keuze}")
+                gekozen = dict(keuzeopties)[gekozen_label]
+                if st.button("🔗 Koppel aan deze deal", key=f"link_offerte_btn_{keuze}", type="primary"):
+                    soort, data = gekozen
+                    if soort == "generator":
+                        p = data
+                        pid = str(p.get("id"))
+                        bedrag = offerte_koppeling.bedrag_van(p, "totaal_incl")
+                        db.voeg_toe("offertes", dict(
+                            deal_id=int(keuze), nummer=f"GEN-{pid}", type=p.get("type"),
+                            totaalprijs=bedrag,
+                            materiaalkost=offerte_koppeling.bedrag_van(p, "mat_inkoop"),
+                            nettowinst=offerte_koppeling.bedrag_van(p, "netto_winst"),
+                            status="Verstuurd", datum=str(p.get("datum") or ""),
+                            bron="Generator", generator_id=pid,
+                            opmerkingen=f"Manueel gekoppeld aan deze deal (klant: {p.get('klant')})"))
+                        db.werk_bij("deals", int(keuze), {"waarde": bedrag})
+                    else:
+                        offerte_id = data
+                        f_rij = db.haal_rij("offertes", offerte_id) or {}
+                        db.werk_bij("offertes", offerte_id, {"deal_id": int(keuze)})
+                        db.werk_bij("deals", int(keuze), {"waarde": f_rij.get("totaalprijs") or 0})
+                    st.success("Offerte gekoppeld aan deze deal — deal-waarde bijgewerkt.")
+                    st.rerun()
 
         # ---- Taken voor deze deal, rechtstreeks hier ----
         st.divider()
