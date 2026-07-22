@@ -136,6 +136,34 @@ def sjabloon_keten_ui(prefix: str, key_suffix: str = ""):
     return gekozen
 
 
+def taken_toevoegen_zonder_duplicaten(deal_id, organisatie_id, taken: dict) -> tuple:
+    """Voegt taken toe (uit een sjabloon-keten) aan een deal, maar slaat een taak
+    over als er al een OPEN/Bezig taak met exact dezelfde omschrijving voor
+    diezelfde deal bestaat — zo krijg je nooit meer 5x dezelfde taak omdat je
+    per ongeluk meermaals op 'Toevoegen' klikte.
+
+    taken: {omschrijving: datum}
+    Retourneert: (aantal_toegevoegd, aantal_overgeslagen_als_duplicaat)
+    """
+    bestaand = db.query_df(
+        "SELECT actie FROM acties WHERE deal_id = ? AND status IN ('Open','Bezig')", (deal_id,)
+    ) if deal_id else db.query_df("SELECT actie FROM acties WHERE 1=0")
+    bestaande_namen = set(bestaand["actie"].tolist()) if not bestaand.empty else set()
+
+    toegevoegd, overgeslagen = 0, 0
+    for naam, datum_veld in taken.items():
+        if naam in bestaande_namen:
+            overgeslagen += 1
+            continue
+        db.voeg_toe("acties", dict(
+            datum=datum_veld.isoformat(), prioriteit="Normaal",
+            organisatie_id=organisatie_id, deal_id=deal_id,
+            actie=naam, status="Open"))
+        bestaande_namen.add(naam)  # binnen dezelfde batch ook niet 2x toevoegen
+        toegevoegd += 1
+    return toegevoegd, overgeslagen
+
+
 # ---------- automatische acties ----------
 
 def maak_vervolgactie(deal_id: int, stadium: str):

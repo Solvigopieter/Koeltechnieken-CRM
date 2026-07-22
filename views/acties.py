@@ -43,7 +43,7 @@ def toon():
         else:
             for _, a in sub.iterrows():
                 laat = helpers.te_laat(a["datum"]) and a["status"] in ("Open", "Bezig")
-                c1, c2 = st.columns([5, 1.4])
+                c1, c2, c3 = st.columns([5, 1.2, 0.6])
                 with c1:
                     datum_html = (f'<span class="telaat">{a["datum"]} — TE LAAT</span>'
                                   if laat else str(a["datum"]))
@@ -64,6 +64,26 @@ def toon():
                     if nieuw_status != a["status"]:
                         db.werk_bij("acties", int(a["id"]), {"status": nieuw_status})
                         st.rerun()
+                with c3:
+                    if st.button("🗑️", key=f"actie_del_{a['id']}", help="Verwijder deze taak",
+                                use_container_width=True):
+                        db.verwijder("acties", int(a["id"]))
+                        st.rerun()
+
+            # ---- Snel duplicaten opruimen: zelfde omschrijving + zelfde deal ----
+            dupes = sub[sub.duplicated(subset=["actie", "deal_id"], keep="first")] if not sub.empty else sub
+            if not dupes.empty:
+                with st.expander(f"🧹 {len(dupes)} mogelijke duplicaat-taak(en) gevonden — snel opruimen"):
+                    st.caption("Taken met exact dezelfde omschrijving én dezelfde deal — "
+                              "waarschijnlijk per ongeluk meermaals toegevoegd. De EERSTE "
+                              "van elke groep blijft altijd staan, enkel de rest wordt verwijderd.")
+                    st.dataframe(dupes[["actie", "deal", "datum", "status"]], use_container_width=True, hide_index=True)
+                    if st.button("🗑️ Verwijder deze duplicaten", key="verwijder_dupes"):
+                        for did in dupes["id"]:
+                            db.verwijder("acties", int(did))
+                        st.success(f"{len(dupes)} duplicaten verwijderd.")
+                        st.rerun()
+
             helpers.export_knop(sub.drop(columns=["organisatie_id", "installatie_id",
                                                   "partner_id", "deal_id"], errors="ignore"),
                                 "acties.xlsx")
@@ -112,10 +132,10 @@ def toon():
             if not gekozen:
                 st.error("Vink minstens één taak aan.")
             else:
-                for naam, datum_veld in gekozen.items():
-                    db.voeg_toe("acties", dict(
-                        datum=datum_veld.isoformat(), prioriteit="Normaal",
-                        organisatie_id=sj_org_id or None, deal_id=sj_deal_id or None,
-                        actie=naam, status="Open"))
-                st.success(f"{len(gekozen)} taken toegevoegd.")
+                toegevoegd, overgeslagen = helpers.taken_toevoegen_zonder_duplicaten(
+                    sj_deal_id or None, sj_org_id or None, gekozen)
+                bericht = f"{toegevoegd} taken toegevoegd."
+                if overgeslagen:
+                    bericht += f" ({overgeslagen} overgeslagen — stonden al open voor deze deal.)"
+                st.success(bericht)
                 st.rerun()

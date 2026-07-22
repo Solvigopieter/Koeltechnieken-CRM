@@ -382,7 +382,7 @@ def toon():
         else:
             for _, a in acties_deal.iterrows():
                 laat = helpers.te_laat(a["datum"]) and a["status"] in ("Open", "Bezig")
-                ac1, ac2 = st.columns([4, 1.3])
+                ac1, ac2, ac3 = st.columns([4, 1.3, 0.5])
                 with ac1:
                     datum_html = (f'<span class="telaat">{a["datum"]} — TE LAAT</span>'
                                   if laat else str(a["datum"]))
@@ -401,6 +401,11 @@ def toon():
                     if nieuw_status != a["status"]:
                         db.werk_bij("acties", int(a["id"]), {"status": nieuw_status})
                         st.rerun()
+                with ac3:
+                    if st.button("🗑️", key=f"pipe_actie_del_{a['id']}", help="Verwijder deze taak",
+                                use_container_width=True):
+                        db.verwijder("acties", int(a["id"]))
+                        st.rerun()
 
         open_vanuit_bord = st.session_state.pop("pipe_sj_open_vanuit_bord", False)
         with st.expander("⚡ Taken uit sjabloon toevoegen aan deze deal", expanded=open_vanuit_bord):
@@ -409,10 +414,10 @@ def toon():
                 if not gekozen:
                     st.error("Vink minstens één taak aan.")
                 else:
-                    for naam, datum_veld in gekozen.items():
-                        db.voeg_toe("acties", dict(
-                            datum=datum_veld.isoformat(), prioriteit="Normaal",
-                            organisatie_id=d.get("organisatie_id"), deal_id=int(keuze),
-                            actie=naam, status="Open"))
-                    st.success(f"{len(gekozen)} taken toegevoegd aan deze deal.")
+                    toegevoegd, overgeslagen = helpers.taken_toevoegen_zonder_duplicaten(
+                        int(keuze), d.get("organisatie_id"), gekozen)
+                    bericht = f"{toegevoegd} taken toegevoegd aan deze deal."
+                    if overgeslagen:
+                        bericht += f" ({overgeslagen} overgeslagen — stonden al open voor deze deal.)"
+                    st.success(bericht)
                     st.rerun()
