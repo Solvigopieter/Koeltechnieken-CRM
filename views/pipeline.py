@@ -65,6 +65,10 @@ def toon():
 
     if "pipeline_sectie" not in st.session_state:
         st.session_state["pipeline_sectie"] = "📋 Bord"
+    # Een eventuele 'spring naar sectie'-aanvraag (bv. via de 'Open taken'-knop) verwerken
+    # VÓÓR de radio-widget hieronder instantieert — nadien mag dat niet meer.
+    if "pipeline_sectie_navigatie" in st.session_state:
+        st.session_state["pipeline_sectie"] = st.session_state.pop("pipeline_sectie_navigatie")
 
     sectie = st.radio("Sectie", ["📋 Bord", "➕ Nieuwe deal", "✏️ Bewerken & taken"],
                       key="pipeline_sectie", horizontal=True, label_visibility="collapsed")
@@ -169,7 +173,7 @@ def toon():
                             help="Springt naar 'Bewerken & taken' voor deze deal, met het sjabloon meteen open."):
                     st.session_state["deal_bewerk_keuze"] = int(keuze)
                     st.session_state["pipe_sj_open_vanuit_bord"] = True
-                    st.session_state["pipeline_sectie"] = "✏️ Bewerken & taken"
+                    st.session_state["pipeline_sectie_navigatie"] = "✏️ Bewerken & taken"
                     st.rerun()
             with c5:
                 st.write("")
