@@ -161,107 +161,80 @@ def toon():
                 al_geimporteerd = set()
                 if not offertes.empty:
                     al_geimporteerd = set(offertes["generator_id"].dropna().astype(str))
-                deals = db.deal_opties()
-                installaties = db.installatie_opties()
-                st.caption(f"{len(projecten)} project(en) in de offertegenerator. "
-                           "Importeer een project om het aan een klant/deal te koppelen.")
+
+                # ---- Automatisch linken: elk nog niet geïmporteerd project krijgt
+                # meteen een organisatie (nieuw, of hergebruikt bij zelfde naam),
+                # een deal én een gekoppelde offerte — zonder handmatige stappen. ----
+                nieuw_gelinkt = []
+                orgs_alle = db.query_df("SELECT id, naam FROM organisaties")
+                orgs_op_naam = {}
+                if not orgs_alle.empty:
+                    orgs_op_naam = {str(n).strip().lower(): int(i) for i, n in
+                                   zip(orgs_alle["id"], orgs_alle["naam"])}
+
+                for p in projecten:
+                    pid = str(p.get("id"))
+                    if pid in al_geimporteerd:
+                        continue
+                    klantnaam = str(p.get("klant") or "").strip() or "(naamloos)"
+                    payload = offerte_koppeling.payload_van(p)
+                    bedrag = offerte_koppeling.bedrag_van(p, "totaal_incl")
+
+                    org_id = orgs_op_naam.get(klantnaam.lower())
+                    if org_id is None:
+                        org_id = db.voeg_toe("organisaties", dict(
+                            klantnummer=helpers.volgend_klantnummer(), naam=klantnaam,
+                            type="Eindklant", adres=str(payload.get("adres") or ""),
+                            email=str(payload.get("email") or ""), telefoon=str(payload.get("tel") or ""),
+                            status="Actief", relatietype="Eenmalige klant"))
+                        orgs_op_naam[klantnaam.lower()] = org_id
+
+                    deal_id = db.voeg_toe("deals", dict(
+                        titel=f"{p.get('type') or 'Offerte'} — {klantnaam}",
+                        type_installatie=p.get("type") or "Airco",
+                        organisatie_id=org_id, waarde=bedrag,
+                        kans=70, stadium="Offerte verstuurd", prioriteit="Normaal",
+                        bron="Offertegenerator"))
+
+                    db.voeg_toe("offertes", dict(
+                        deal_id=deal_id, nummer=f"GEN-{pid}", type=p.get("type"),
+                        totaalprijs=bedrag,
+                        materiaalkost=offerte_koppeling.bedrag_van(p, "mat_inkoop"),
+                        nettowinst=offerte_koppeling.bedrag_van(p, "netto_winst"),
+                        status="Verstuurd", datum=str(p.get("datum") or ""),
+                        bron="Generator", generator_id=pid,
+                        opmerkingen=f"Automatisch gelinkt uit offertegenerator (klant: {klantnaam})"))
+                    nieuw_gelinkt.append((klantnaam, bedrag))
+                    al_geimporteerd.add(pid)
+
+                if nieuw_gelinkt:
+                    st.success("🔁 Automatisch gelinkt: " + ", ".join(
+                        f"**{naam}** ({helpers.euro(bedrag)})" for naam, bedrag in nieuw_gelinkt))
+                    st.caption("Klant, deal en offerte zijn automatisch aangemaakt en aan elkaar gekoppeld. "
+                              "Klopt het installatie-adres, de klantgegevens of de deal-titel niet helemaal? "
+                              "Pas dat gerust aan bij Organisaties / Pipeline / Offertes → Bewerken.")
+                    st.rerun()
+
+                st.caption(f"{len(projecten)} project(en) in de offertegenerator — allemaal automatisch "
+                          "gelinkt zodra ze verschijnen. Overzicht:")
                 for p in projecten[:30]:
                     pid = str(p.get("id"))
-                    geimporteerd = pid in al_geimporteerd
-                    with st.expander(
-                        f"{'✅ ' if geimporteerd else ''}{p.get('datum')} — {p.get('type')} — "
-                        f"{p.get('klant')} — {helpers.euro(offerte_koppeling.bedrag_van(p))}"
-                    ):
-                        if geimporteerd:
-                            reeds = offertes[offertes["generator_id"].astype(str) == pid]
-                            huidig_bedrag = reeds.iloc[0]["totaalprijs"] if not reeds.empty else 0
-                            st.info(f"Al geïmporteerd in het CRM als offerte met bedrag "
-                                   f"**{helpers.euro(huidig_bedrag)}**.")
+                    reeds = offertes[offertes["generator_id"].astype(str) == pid] if not offertes.empty else offertes
+                    huidig_bedrag = reeds.iloc[0]["totaalprijs"] if not reeds.empty else offerte_koppeling.bedrag_van(p)
+                    gekoppelde_deal = reeds.iloc[0]["deal"] if (not reeds.empty and "deal" in reeds.columns) else None
+                    with st.expander(f"✅ {p.get('datum')} — {p.get('type')} — {p.get('klant')} — "
+                                    f"{helpers.euro(huidig_bedrag)}"):
+                        if not reeds.empty:
+                            st.write(f"Gekoppeld aan deal: **{gekoppelde_deal or '—'}**")
                             if abs(float(huidig_bedrag or 0) - offerte_koppeling.bedrag_van(p)) > 0.01:
                                 st.warning("⚠️ Dit bedrag wijkt af van wat de generator nu toont "
                                           f"({helpers.euro(offerte_koppeling.bedrag_van(p))}) — "
-                                          "waarschijnlijk geïmporteerd vóór een eerdere fix.")
-                            if st.button("🗑️ Verwijder deze offerte uit CRM (zodat je opnieuw kan importeren)",
+                                          "waarschijnlijk aangepast in de generator ná het linken.")
+                            if st.button("🗑️ Verwijderen uit CRM (zodat je opnieuw kan linken)",
                                         key=f"gen_verwijder_reimport_{pid}"):
-                                if not reeds.empty:
-                                    db.verwijder("offertes", int(reeds.iloc[0]["id"]))
-                                    st.success("Verwijderd — je kan dit project nu hieronder opnieuw importeren.")
-                                    st.rerun()
-                            continue
-
-                        payload = offerte_koppeling.payload_van(p)
-
-                        with st.expander("⚡ Nieuwe klant + deal in 1 klik aanmaken "
-                                         "(handig — de meeste HVAC-klanten bestaan nog niet in het CRM)"):
-                            st.caption("Naam/adres/e-mail/telefoon worden overgenomen uit de offerte "
-                                      "zelf. Klantnummer wordt automatisch voorgesteld.")
-                            sc1, sc2 = st.columns([1, 3])
-                            with sc1:
-                                snel_nr = st.text_input("Klantnummer", value=helpers.volgend_klantnummer(),
-                                                        key=f"gen_snelnr_{pid}")
-                            with sc2:
-                                snel_naam = st.text_input("Klantnaam", value=str(p.get("klant") or ""),
-                                                          key=f"gen_snelnaam_{pid}")
-                            sc3, sc4 = st.columns(2)
-                            with sc3:
-                                snel_adres = st.text_input("Adres", value=str(payload.get("adres") or ""),
-                                                           key=f"gen_sneladres_{pid}")
-                                snel_email = st.text_input("E-mail", value=str(payload.get("email") or ""),
-                                                           key=f"gen_snelemail_{pid}")
-                            with sc4:
-                                snel_tel = st.text_input("Telefoon", value=str(payload.get("tel") or ""),
-                                                         key=f"gen_sneltel_{pid}")
-                            if st.button("➕ Klant + deal aanmaken", key=f"gen_snelmaak_{pid}"):
-                                if not snel_naam.strip():
-                                    st.error("Vul een klantnaam in.")
-                                else:
-                                    nieuw_org_id = db.voeg_toe("organisaties", dict(
-                                        klantnummer=snel_nr.strip(), naam=snel_naam.strip(),
-                                        type="Eindklant", adres=snel_adres, email=snel_email,
-                                        telefoon=snel_tel, status="Actief", relatietype="Eenmalige klant"))
-                                    nieuwe_deal_id = db.voeg_toe("deals", dict(
-                                        titel=f"{p.get('type') or 'Offerte'} — {snel_naam.strip()}",
-                                        type_installatie=p.get("type") or "Airco",
-                                        organisatie_id=nieuw_org_id,
-                                        waarde=offerte_koppeling.bedrag_van(p),
-                                        kans=70, stadium="Offerte verstuurd", prioriteit="Normaal",
-                                        bron="Offertegenerator"))
-                                    st.session_state[f"gen_deal_{pid}"] = nieuwe_deal_id
-                                    st.success(f"Klant {snel_nr.strip()} en deal aangemaakt — automatisch gekoppeld.")
-                                    st.rerun()
-
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            deal_id = st.selectbox("Koppel aan deal", list(deals),
-                                                   format_func=deals.get, key=f"gen_deal_{pid}")
-                        with c2:
-                            installatie_id = st.selectbox("Koppel aan installatie-adres",
-                                                          list(installaties),
-                                                          format_func=installaties.get,
-                                                          key=f"gen_inst_{pid}")
-                        status = st.selectbox("Status in CRM", helpers.OFFERTE_STATUSSEN, index=1,
-                                              key=f"gen_status_{pid}")
-                        if st.button("⬇️ Importeer als offerte", key=f"gen_import_{pid}",
-                                     type="primary"):
-                            bedrag = offerte_koppeling.bedrag_van(p, "totaal_incl")
-                            db.voeg_toe("offertes", dict(
-                                deal_id=deal_id or None, installatie_id=installatie_id or None,
-                                nummer=f"GEN-{pid}", type=p.get("type"),
-                                totaalprijs=bedrag,
-                                materiaalkost=offerte_koppeling.bedrag_van(p, "mat_inkoop"),
-                                nettowinst=offerte_koppeling.bedrag_van(p, "netto_winst"),
-                                status=status, datum=str(p.get("datum") or ""),
-                                bron="Generator", generator_id=pid,
-                                opmerkingen=f"Geïmporteerd uit offertegenerator (klant: {p.get('klant')})"))
-                            if deal_id:
-                                # Deal-waarde meteen op het offertebedrag zetten — anders
-                                # blijft de deal op €0 staan, ook al hangt er een offerte aan.
-                                db.werk_bij("deals", int(deal_id), {"waarde": bedrag})
-                                if status == "Verstuurd":
-                                    helpers.wijzig_stadium(int(deal_id), "Offerte verstuurd")
-                            st.success("Offerte geïmporteerd"
-                                      + (" — deal-waarde bijgewerkt naar dit bedrag." if deal_id else "."))
-                            st.rerun()
+                                db.verwijder("offertes", int(reeds.iloc[0]["id"]))
+                                st.success("Verwijderd — wordt bij de volgende verversing opnieuw automatisch gelinkt.")
+                                st.rerun()
 
     # ---------------- handmatig ----------------
     with tab_nieuw:
