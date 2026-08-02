@@ -18,6 +18,8 @@ import json
 
 import streamlit as st
 
+import db
+
 PROJECT_HEADERS = ["id", "datum", "type", "klant", "totaal_incl", "mat_inkoop", "netto_winst", "payload"]
 
 
@@ -60,7 +62,7 @@ def haal_generator_projecten() -> list[dict]:
     try:
         sh = _offerte_sheet()
         ws = sh.worksheet("Projecten")
-        records = ws.get_all_records(expected_headers=PROJECT_HEADERS)
+        records = db._met_retry(ws.get_all_records, expected_headers=PROJECT_HEADERS)
     except Exception:
         return []
     projecten = [r for r in records if str(r.get("id", "")).strip()]

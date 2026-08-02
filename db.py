@@ -257,6 +257,30 @@ CREATE TABLE IF NOT EXISTS bestanden (
 );
 """
 
+# ---------- retry bij tijdelijke Google Sheets-fouten (bv. rate limit) ----------
+
+def _met_retry(functie, *args, pogingen: int = 4, **kwargs):
+    """Voert een Google Sheets-API-aanroep uit met automatisch herproberen bij
+    tijdelijke fouten (bv. HTTP 429 'rate limit exceeded' — Google Sheets laat
+    maar een beperkt aantal aanvragen per minuut toe). Zonder dit crasht de app
+    soms even bij druk gebruik, terwijl een simpele herpoging na een korte pauze
+    het probleem meestal vanzelf oplost."""
+    laatste_fout = None
+    for poging in range(pogingen):
+        try:
+            return functie(*args, **kwargs)
+        except Exception as e:
+            laatste_fout = e
+            naam = type(e).__name__
+            tekst = str(e).lower()
+            tijdelijk = ("apierror" in naam.lower() or "429" in tekst or "rate" in tekst
+                        or "quota" in tekst or "timeout" in tekst or "503" in tekst)
+            if not tijdelijk or poging == pogingen - 1:
+                raise
+            time.sleep(1.5 * (2 ** poging))  # 1.5s, 3s, 6s, ...
+    raise laatste_fout
+
+
 # ---------- configuratie ----------
 
 def _secret_get(naam: str, standaard: Any = None) -> Any:
@@ -386,7 +410,7 @@ def _worksheet(tabel: str):
     if ws is None:
         ws = ss.add_worksheet(title=tabel, rows=1000, cols=max(20, len(headers)))
         werkbladen[tabel] = ws
-        ws.update(values=[headers], range_name="A1")
+        _met_retry(ws.update, values=[headers], range_name="A1")
 
     return ws
 
@@ -395,10 +419,10 @@ def _sheet_records_direct(tabel: str) -> list[dict]:
     ws = _worksheet(tabel)
     headers = TABEL_KOLOMMEN[tabel]
     try:
-        records = ws.get_all_records(expected_headers=headers)
+        records = _met_retry(ws.get_all_records, expected_headers=headers)
     except Exception:
         try:
-            records = ws.get_all_records()
+            records = _met_retry(ws.get_all_records)
         except Exception:
             return []
 
@@ -503,12 +527,12 @@ def _google_init_db():
     for tabel in TABEL_KOLOMMEN:
         ws = _worksheet(tabel)
         try:
-            huidige_headers = ws.row_values(1)
+            huidige_headers = _met_retry(ws.row_values, 1)
             verwacht = TABEL_KOLOMMEN[tabel]
             ontbrekend = [h for h in verwacht if h not in huidige_headers]
             if ontbrekend:
                 nieuwe_headers = huidige_headers + ontbrekend
-                ws.update(values=[nieuwe_headers], range_name="A1")
+                _met_retry(ws.update, values=[nieuwe_headers], range_name="A1")
         except Exception:
             pass
     _GS_INITIALIZED = True
@@ -564,7 +588,7 @@ def _google_voeg_toe(tabel: str, data: dict) -> int:
     rij_id = int(data.get("id") or _volgend_id(tabel))
     record = _met_standaarden(tabel, dict(data, id=rij_id))
     waarden = [_als_sheet_waarde(record.get(k, "")) for k in TABEL_KOLOMMEN[tabel]]
-    ws.append_row(waarden, value_input_option="USER_ENTERED")
+    _met_retry(ws.append_row, waarden, value_input_option="USER_ENTERED")
     _invalidate_google_cache()
     return rij_id
 
@@ -590,9 +614,9 @@ def _google_haal_rij(tabel: str, rij_id: int):
 def _google_werk_bij(tabel: str, rij_id: int, data: dict):
     ws = _worksheet(tabel)
     headers = TABEL_KOLOMMEN[tabel]
-    waarden = ws.get_all_values()
+    waarden = _met_retry(ws.get_all_values)
     if not waarden:
-        ws.update(values=[headers], range_name="A1")
+        _met_retry(ws.update, values=[headers], range_name="A1")
         waarden = [headers]
 
     doelrij = None
@@ -612,19 +636,19 @@ def _google_werk_bij(tabel: str, rij_id: int, data: dict):
     bestaand.update(data)
     rijwaarden = [_als_sheet_waarde(bestaand.get(k, "")) for k in headers]
     laatste_kolom = chr(ord("A") + len(headers) - 1) if len(headers) <= 26 else "ZZ"
-    ws.update(values=[rijwaarden], range_name=f"A{doelrij}:{laatste_kolom}{doelrij}")
+    _met_retry(ws.update, values=[rijwaarden], range_name=f"A{doelrij}:{laatste_kolom}{doelrij}")
     _invalidate_google_cache()
 
 
 def _google_verwijder(tabel: str, rij_id: int):
     ws = _worksheet(tabel)
-    waarden = ws.get_all_values()
+    waarden = _met_retry(ws.get_all_values)
     for idx, rij in enumerate(waarden[1:], start=2):
         if not rij:
             continue
         try:
             if int(rij[0]) == int(rij_id):
-                ws.delete_rows(idx)
+                _met_retry(ws.delete_rows, idx)
                 _invalidate_google_cache()
                 return
         except (TypeError, ValueError, IndexError):
