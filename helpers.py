@@ -30,6 +30,24 @@ STADIA = [
 STADIUM_NAMEN = [s[0] for s in STADIA]
 VOLGENDE_ACTIE = {s[0]: (s[1], s[2]) for s in STADIA}
 
+# Standaard slaagkans (%) per stadium — wordt automatisch toegepast op de deal
+# bij een stadiumwissel, zodat 'Gewogen (kans %)' op het dashboard realistisch
+# meebeweegt i.p.v. vast te blijven staan op wat je ooit manueel intikte.
+STADIUM_KANS = {
+    "Nieuwe lead": 10,
+    "Te kwalificeren": 20,
+    "Plaatsbezoek gepland": 30,
+    "Plaatsbezoek uitgevoerd": 40,
+    "Offerte verstuurd": 50,
+    "Opvolging offerte": 60,
+    "Goedgekeurd / in te plannen": 90,
+    "In uitvoering": 95,
+    "Uitgevoerd": 100,
+    "Facturatie": 100,
+    "Afgerond": 100,
+    "Verloren": 0,
+}
+
 STADIUM_KLEUR = {
     "Nieuwe lead": "#8A94A6", "Te kwalificeren": "#8A94A6",
     "Plaatsbezoek gepland": "#5B6B8C", "Plaatsbezoek uitgevoerd": "#5B6B8C",
@@ -195,7 +213,35 @@ def maak_vervolgactie(deal_id: int, stadium: str):
 
 
 def wijzig_stadium(deal_id: int, nieuw_stadium: str):
-    db.werk_bij("deals", deal_id, {"stadium": nieuw_stadium, "gewijzigd": date.today().isoformat()})
+    deal = db.haal_rij("deals", deal_id)
+    oud_stadium = deal.get("stadium") if deal else None
+
+    # Terugzetten naar een EERDERE stap? Dan zijn de automatisch aangemaakte
+    # taken van de stappen die je nu 'overslaat' (tussen de nieuwe en de oude
+    # stap) niet meer relevant — die worden geannuleerd (niet verwijderd, blijft
+    # zichtbaar in de historiek) zodat je actielijst niet vervuild raakt met
+    # taken voor een fase die niet meer aan de orde is.
+    if oud_stadium in STADIUM_NAMEN and nieuw_stadium in STADIUM_NAMEN:
+        oud_idx = STADIUM_NAMEN.index(oud_stadium)
+        nieuw_idx = STADIUM_NAMEN.index(nieuw_stadium)
+        if nieuw_idx < oud_idx:
+            niet_meer_relevant = {
+                VOLGENDE_ACTIE[s][0] for s in STADIUM_NAMEN[nieuw_idx + 1:oud_idx + 1]
+                if VOLGENDE_ACTIE.get(s) and VOLGENDE_ACTIE[s][0]
+            }
+            open_taken = db.query_df(
+                "SELECT id, actie FROM acties WHERE deal_id = ? AND status IN ('Open','Bezig')",
+                (deal_id,))
+            if not open_taken.empty:
+                for _, t in open_taken.iterrows():
+                    if t["actie"] in niet_meer_relevant:
+                        db.werk_bij("acties", int(t["id"]), {"status": "Geannuleerd"})
+
+    nieuwe_kans = STADIUM_KANS.get(nieuw_stadium)
+    updates = {"stadium": nieuw_stadium, "gewijzigd": date.today().isoformat()}
+    if nieuwe_kans is not None:
+        updates["kans"] = nieuwe_kans
+    db.werk_bij("deals", deal_id, updates)
     return maak_vervolgactie(deal_id, nieuw_stadium)
 
 
